@@ -203,6 +203,14 @@ def _with_default_args(st, d: Decision) -> Decision:
     return d if args == (d.args or {}) else d.model_copy(update={"args": args})
 
 
+def _is_demo_inbox_owner(email: Optional[str]) -> bool:
+    """The demo inbox itself (e.g. Justin's own address, no +tag): that person always says yes, so the
+    demo reliably reaches the real voice interview sent to their inbox."""
+    from api.config import get_settings
+    inbox = (get_settings().demo_inbox or "").strip().lower()
+    return bool(email) and email.strip().lower() == inbox
+
+
 def _thread_id(st) -> str:
     return f"thread-{st['candidate_id']}"
 
@@ -219,7 +227,8 @@ async def _send_email(tools, st) -> dict:
            "message_id": getattr(receipt, "message_id", None)}
     if d.action == A.send_outreach:
         # The simulated candidate decides whether and how to answer (pinned for scripted demos).
-        disposition = (st["candidate"] or {}).get("demo_disposition") or pick_disposition()
+        disposition = (st["candidate"] or {}).get("demo_disposition") or (
+            "interested" if _is_demo_inbox_owner(to) else pick_disposition())
         out["disposition"] = disposition
         if disposition != "no_reply":
             sent = Message(direction="out", subject=subject, body=body)

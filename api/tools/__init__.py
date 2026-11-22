@@ -104,7 +104,9 @@ def build_tools(s: Settings) -> Tools:
         "host": s.smtp_host, "port": s.smtp_port, "user": s.smtp_user, "password": s.smtp_password,
         "from": s.smtp_from})
     status["email"] = (f"REAL to allowlist ({', '.join(sorted(s.email_allowlist_set))})"
-                       if s.allow_real_email and s.smtp_host and s.email_allowlist_set else "simulated")
+                       if s.allow_real_email and s.smtp_host and s.smtp_user and s.smtp_password
+                       and s.email_allowlist_set else
+                       "simulated (set SMTP_PASSWORD to send for real)" if s.allow_real_email else "simulated")
 
     tools = Tools(
         ploid=ploid, fiber=fiber, browser=browser, email=email,
