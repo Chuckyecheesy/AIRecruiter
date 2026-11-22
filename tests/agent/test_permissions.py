@@ -26,7 +26,20 @@ Assumed behaviour in api/agent/graph.py:
       from the stored payload in the same run; the approval ends `executed`.
     - observe on ApprovalGranted loads the approval and jumps straight to execute with its stored
       payload (the LLM is not consulted); replaying the event never executes twice.
-    - send_outreach executes via tools.email.send(to, subject, body, thread_id).
+    - send_outreach executes via tools.email.send(to, subject, body, thread_id); send_followup the
+      same way; schedule_interview via tools.elevenlabs.create_interview(candidate_id, questions, context, ...).
+    - execute_approved: if fn raises, the claim is released (executed -> approved) so a retry can send;
+      a send that never happened must not look "executed".
+    - After a send_outreach: a `messages` row (direction "out", simulated), a contact_log entry
+      (kind "email_out"), an EmailSent event; disposition = candidate.demo_disposition or
+      graph.pick_disposition(); tools.persona.reply(profile, thread, disposition) -> text;
+      a delayed EmailReplied event (payload {"body": text}, not_before in the future).
+      "no_reply" inserts no EmailReplied.
+    - process_reply on EmailReplied (payload {"body": text}): writes an inbound `messages` row and a
+      contact_log entry (kind "email_in"), classifies via tools.persona.classify(text) ->
+      ReplyClassification(intent), result {"classification": intent}: interested -> INTERESTED,
+      declined -> DECLINED, question -> stays CONTACTED and runs draft_reply (tools.drafter.reply),
+      stored as a contact_log entry of kind "draft_reply". process_reply needs no approval.
 """
 import asyncio
 import threading
@@ -39,7 +52,7 @@ from api.contracts import (
     ActionName as A, Approval, CandidateState as S, Decision, Event, EventType as E, JobState,
 )
 from api.db import repo
-from api.tools.models import Draft
+from api.tools.models import Draft, ReplyClassification
 
 RESTRICTED = [A.send_outreach, A.send_followup, A.schedule_interview, A.reject_candidate_proposal]
 # (state in which the action is valid, action)
@@ -84,14 +97,49 @@ class FakeEmail:
 class FakeDrafter:
     def __init__(self):
         self.feedback = []
+        self.reply_calls = 0
+
+    async def reply(self, job, memory, thread):
+        self.reply_calls += 1
+        return Draft(body="Happy to answer: yes, remote-friendly.")
 
     async def outreach(self, job, memory, feedback=None):
         self.feedback.append(feedback)
         return Draft(subject="Redraft", body="redrafted body")
 
 
-def tools_with(email=None, drafter=None):
-    return SimpleNamespace(email=email or FakeEmail(), drafter=drafter or FakeDrafter())
+class FakePersona:
+    def __init__(self, text="Sounds great, happy to chat.", intent="interested"):
+        self.text, self.intent = text, intent
+        self.reply_calls, self.classify_calls = [], []
+
+    async def reply(self, profile, thread, disposition):
+        self.reply_calls.append({"profile": profile, "thread": thread, "disposition": disposition})
+        return self.text
+
+    async def classify(self, reply_text):
+        self.classify_calls.append(reply_text)
+        return ReplyClassification(intent=self.intent, reasoning="fake")
+
+
+class FakeEleven:
+    def __init__(self):
+        self.calls = []
+
+    async def create_interview(self, candidate_id, questions, context, **kw):
+        self.calls.append({"candidate_id": candidate_id, "questions": questions, "context": context})
+        return SimpleNamespace(conversation_id="conv1", join_url="https://example.test/join")
+
+
+def tools_with(email=None, drafter=None, persona=None, elevenlabs=None):
+    return SimpleNamespace(email=email or FakeEmail(), drafter=drafter or FakeDrafter(),
+                           persona=persona or FakePersona(), elevenlabs=elevenlabs or FakeEleven())
+
+
+def messages_of(cid):
+    with repo.get_conn() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM messages WHERE candidate_id=? ORDER BY created_at, rowid", (cid,))]
 
 
 def scripted(action, **args):
@@ -539,3 +587,312 @@ async def test_stale_approved_row_of_another_candidate_cannot_authorize_a_send(d
                           llm=scripted(A.send_outreach, subject="Hi", body="to B"))
     assert all(m["to"] != "grace@example.com" for m in tools.email.sent)
     assert repo.get_approval(aid).status == "approved"  # A's approval untouched
+
+
+# ======================================================================
+# Item 8: after send_outreach -> messages, contact_log, EmailSent, persona reply, delayed EmailReplied
+# ======================================================================
+
+async def send_via_auto_approve(disposition=None, persona=None, **policy):
+    job = make_job(auto_approve=True, **policy)
+    cid = make_candidate(job)
+    if disposition:
+        repo.set_demo_disposition(cid, disposition)
+    tools = tools_with(persona=persona)
+    await graph.run_event(event(job, E.Tick, cid), tools=tools,
+                          llm=scripted(A.send_outreach, subject="Hi Ada", body="Join us"))
+    return job, cid, tools
+
+
+async def test_send_outreach_writes_a_simulated_outbound_messages_row(db):
+    job, cid, tools = await send_via_auto_approve("interested")
+    (m,) = [m for m in messages_of(cid) if m["direction"] == "out"]
+    assert (m["channel"], m["subject"], m["body"], m["simulated"]) == ("email", "Hi Ada", "Join us", 1)
+    assert m["thread_id"] == tools.email.sent[0]["thread_id"]
+
+
+async def test_send_outreach_appends_to_contact_log(db):
+    job, cid, _ = await send_via_auto_approve("interested")
+    entry = [e for e in repo.get_memory(cid).contact_log if e.get("kind") == "email_out"]
+    assert len(entry) == 1 and entry[0]["body"] == "Join us" and entry[0].get("ts")
+
+
+async def test_send_outreach_emits_email_sent(db):
+    job, cid, _ = await send_via_auto_approve("interested")
+    assert len(events_of(job, E.EmailSent)) == 1
+
+
+async def test_pinned_demo_disposition_drives_the_persona(db, monkeypatch):
+    monkeypatch.setattr(graph, "pick_disposition",
+                        lambda *a, **k: pytest.fail("pinned disposition must not be re-rolled"))
+    persona = FakePersona()
+    await send_via_auto_approve("asks_question", persona=persona)
+    assert [c["disposition"] for c in persona.reply_calls] == ["asks_question"]
+
+
+async def test_unpinned_disposition_is_picked_by_pick_disposition(db, monkeypatch):
+    monkeypatch.setattr(graph, "pick_disposition", lambda *a, **k: "not_interested")
+    persona = FakePersona()
+    await send_via_auto_approve(None, persona=persona)
+    assert [c["disposition"] for c in persona.reply_calls] == ["not_interested"]
+
+
+async def test_persona_sees_the_outbound_message_in_the_thread(db):
+    persona = FakePersona()
+    await send_via_auto_approve("interested", persona=persona)
+    (call,) = persona.reply_calls
+    assert [(m.direction, m.body) for m in call["thread"]] == [("out", "Join us")]
+
+
+async def test_persona_reply_becomes_a_delayed_email_replied_event(db):
+    persona = FakePersona(text="Yes, call me!")
+    job, cid, _ = await send_via_auto_approve("interested", persona=persona)
+    (ev,) = events_of(job, E.EmailReplied)
+    assert ev["candidate_id"] == cid
+    assert "Yes, call me!" in ev["payload"]
+    assert ev["not_before"] and ev["not_before"] > repo.now_iso()  # delayed, not instant
+    assert ev["status"] == "pending"
+
+
+async def test_no_reply_disposition_inserts_nothing(db):
+    job, cid, _ = await send_via_auto_approve("no_reply")
+    assert events_of(job, E.EmailReplied) == []
+    assert [m for m in messages_of(cid) if m["direction"] == "in"] == []
+    assert len(events_of(job, E.EmailSent)) == 1  # the send itself still happened
+
+
+async def test_manual_approval_path_also_writes_message_and_schedules_reply(db):
+    job = make_job()
+    cid = make_candidate(job)
+    repo.set_demo_disposition(cid, "interested")
+    aid = pending_send_approval(job, cid)
+    repo.decide_approval(aid, True)
+    granted = events_of(job, E.ApprovalGranted)[0]
+    await graph.run_event(Event(id=granted["id"], job_id=job, candidate_id=cid,
+                                type=E.ApprovalGranted, payload={"approval_id": aid}),
+                          tools=tools_with(), llm=never_called_llm())
+    assert [m["body"] for m in messages_of(cid) if m["direction"] == "out"] == ["Approved body"]
+    assert len(events_of(job, E.EmailSent)) == 1
+    assert len(events_of(job, E.EmailReplied)) == 1
+
+
+# ======================================================================
+# Item 9: process_reply classification -> INTERESTED / DECLINED / draft_reply
+# ======================================================================
+
+async def reply_run(intent, text="Thanks for reaching out!"):
+    job = make_job()
+    cid = make_candidate(job, S.CONTACTED)
+    persona, drafter = FakePersona(intent=intent), FakeDrafter()
+    tools = tools_with(persona=persona, drafter=drafter)
+    await graph.run_event(event(job, E.EmailReplied, cid, body=text), tools=tools,
+                          llm=scripted(A.process_reply))
+    return job, cid, tools
+
+
+async def test_process_reply_classifies_the_reply_text(db):
+    _, _, tools = await reply_run("interested", "I'd love to chat")
+    assert tools.persona.classify_calls == ["I'd love to chat"]
+
+
+async def test_interested_reply_moves_candidate_to_interested(db):
+    _, cid, _ = await reply_run("interested")
+    assert state_of(cid) == S.INTERESTED
+
+
+async def test_declined_reply_moves_candidate_to_declined(db):
+    _, cid, _ = await reply_run("declined", "No thanks")
+    assert state_of(cid) == S.DECLINED
+
+
+async def test_question_reply_keeps_contacted_and_drafts_a_reply(db):
+    _, cid, tools = await reply_run("question", "Is it remote?")
+    assert state_of(cid) == S.CONTACTED
+    assert tools.drafter.reply_calls == 1
+    drafts = [e for e in repo.get_memory(cid).contact_log if e.get("kind") == "draft_reply"]
+    assert len(drafts) == 1 and "remote" in drafts[0]["body"]
+
+
+async def test_question_reply_draft_is_not_sent_without_approval(db):
+    _, cid, tools = await reply_run("question", "Is it remote?")
+    assert tools.email.sent == []
+
+
+async def test_inbound_reply_is_stored_as_message_and_contact_log(db):
+    _, cid, _ = await reply_run("interested", "I'd love to chat")
+    (m,) = [m for m in messages_of(cid) if m["direction"] == "in"]
+    assert m["body"] == "I'd love to chat" and m["channel"] == "email"
+    assert any(e.get("kind") == "email_in" and e["body"] == "I'd love to chat"
+               for e in repo.get_memory(cid).contact_log)
+
+
+@pytest.mark.parametrize("intent", ["interested", "declined", "question"])
+async def test_process_reply_needs_no_approval(db, intent):
+    _, cid, _ = await reply_run(intent)
+    assert approvals_of(cid) == []
+
+
+async def test_full_chain_send_then_delayed_reply_then_interested(db):
+    """Send (auto-approved) -> persona reply event -> process_reply -> INTERESTED."""
+    persona = FakePersona(text="Yes please", intent="interested")
+    job, cid, tools = await send_via_auto_approve("interested", persona=persona)
+    assert state_of(cid) == S.CONTACTED
+    (ev,) = events_of(job, E.EmailReplied)
+    import json
+    payload = json.loads(ev["payload"]) if isinstance(ev["payload"], str) else ev["payload"]
+    await graph.run_event(Event(id=ev["id"], job_id=job, candidate_id=cid, type=E.EmailReplied,
+                                payload=payload), tools=tools, llm=scripted(A.process_reply))
+    assert state_of(cid) == S.INTERESTED
+
+
+# ======================================================================
+# Item 5: APPROVED is a durable state between approval and send
+# ======================================================================
+
+class ExplodingEmail(FakeEmail):
+    def __init__(self, exc):
+        super().__init__()
+        self.exc = exc
+
+    async def send(self, *a, **k):
+        raise self.exc
+
+
+async def test_execute_approved_releases_the_claim_when_fn_fails(db):
+    from api.tools.base import ToolError
+    job = make_job()
+    cid = make_candidate(job)
+    aid = pending_send_approval(job, cid)
+    repo.decide_approval(aid, True)
+
+    async def boom(payload):
+        raise ToolError("fatal", "smtp down")
+
+    with pytest.raises(ToolError):
+        await permissions.execute_approved(aid, boom)
+    ap = repo.get_approval(aid)
+    assert ap.status == "approved" and ap.executed_at is None  # nothing was sent, so not "executed"
+    seen = []
+
+    async def ok(payload):
+        seen.append(payload)
+
+    await permissions.execute_approved(aid, ok)  # a retry may now send
+    assert seen == [APPROVED_PAYLOAD] and repo.get_approval(aid).status == "executed"
+
+
+async def test_failed_send_leaves_the_approval_approved_and_nothing_recorded(db):
+    from api.tools.base import ToolError
+    job = make_job()
+    cid = make_candidate(job)
+    aid = pending_send_approval(job, cid)
+    repo.decide_approval(aid, True)
+    tools = tools_with(email=ExplodingEmail(ToolError("fatal", "smtp down")))
+    granted = events_of(job, E.ApprovalGranted)[0]
+    await graph.run_event(Event(id=granted["id"], job_id=job, candidate_id=cid,
+                                type=E.ApprovalGranted, payload={"approval_id": aid}),
+                          tools=tools, llm=never_called_llm())
+    assert repo.get_approval(aid).status == "approved"
+    assert messages_of(cid) == []
+    assert events_of(job, E.EmailSent) == []
+    assert state_of(cid) != S.CONTACTED
+
+
+async def test_crash_mid_send_then_event_retry_sends_exactly_once(db):
+    job = make_job()
+    cid = make_candidate(job)
+    aid = pending_send_approval(job, cid)
+    repo.decide_approval(aid, True)
+    granted = events_of(job, E.ApprovalGranted)[0]
+    ev = Event(id=granted["id"], job_id=job, candidate_id=cid, type=E.ApprovalGranted,
+               payload={"approval_id": aid})
+    with pytest.raises(RuntimeError):
+        await graph.run_event(ev, tools=tools_with(email=ExplodingEmail(RuntimeError("process died"))),
+                              llm=never_called_llm())
+    assert state_of(cid) == S.APPROVED  # durable: the approval survived the crash
+    assert repo.get_approval(aid).status == "approved"
+    tools = tools_with()
+    await graph.run_event(ev, tools=tools, llm=never_called_llm())  # dispatcher retries the event
+    assert len(tools.email.sent) == 1
+    assert state_of(cid) == S.CONTACTED
+
+
+async def test_auto_approved_send_goes_through_the_approved_state(db):
+    job = make_job(auto_approve=True)
+    cid = make_candidate(job)
+    seen_states = []
+
+    class Spy(FakeEmail):
+        async def send(self, *a, **k):
+            seen_states.append(state_of(cid))
+            return await super().send(*a, **k)
+
+    await graph.run_event(event(job, E.Tick, cid), tools=tools_with(email=Spy()),
+                          llm=scripted(A.send_outreach, subject="Hi", body="b"))
+    assert seen_states == [S.APPROVED]
+
+
+# ======================================================================
+# Item 7: defense in depth for every restricted action, not just send_outreach
+# ======================================================================
+
+@pytest.mark.parametrize("state,action,args", [
+    (S.CONTACTED, A.send_followup, {"subject": "Re: Hi", "body": "Following up"}),
+])
+async def test_auto_approved_followup_sends_the_stored_payload(db, state, action, args):
+    job = make_job(auto_approve=True)
+    cid = make_candidate(job, state)
+    tools = tools_with()
+    await graph.run_event(event(job, E.Tick, cid), tools=tools, llm=scripted(action, **args))
+    assert [(m["subject"], m["body"]) for m in tools.email.sent] == [("Re: Hi", "Following up")]
+    (row,) = approvals_of(cid)
+    assert row["status"] == "executed" and row["decided_by"] == "auto"
+    assert state_of(cid) == S.CONTACTED
+
+
+async def test_auto_approved_schedule_interview_uses_the_stored_questions(db):
+    job = make_job(auto_approve=True)
+    cid = make_candidate(job, S.INTERESTED)
+    tools = tools_with()
+    await graph.run_event(event(job, E.Tick, cid), tools=tools,
+                          llm=scripted(A.schedule_interview, questions=["Tell me about Kafka"],
+                                       context="backend role"))
+    assert [c["questions"] for c in tools.elevenlabs.calls] == [["Tell me about Kafka"]]
+    (row,) = approvals_of(cid)
+    assert row["status"] == "executed"
+    assert state_of(cid) == S.INTERVIEWING
+
+
+@pytest.mark.parametrize("state,action,args", [
+    (S.OUTREACH_DRAFTED, A.send_outreach, {"subject": "s", "body": "b"}),
+    (S.CONTACTED, A.send_followup, {"subject": "s", "body": "b"}),
+    (S.INTERESTED, A.schedule_interview, {"questions": ["q"]}),
+])
+@pytest.mark.parametrize("decision", ["pending", "rejected"])
+async def test_granted_event_for_an_unapproved_row_runs_no_tool(db, state, action, args, decision):
+    job = make_job()
+    cid = make_candidate(job, state)
+    aid = repo.create_approval(job, cid, action, args, "why")
+    if decision == "rejected":
+        repo.decide_approval(aid, False, feedback="no")
+    tools = tools_with()
+    await graph.run_event(event(job, E.ApprovalGranted, cid, approval_id=aid, action=action.value),
+                          tools=tools, llm=scripted(A.wait))
+    assert tools.email.sent == [] and tools.elevenlabs.calls == []
+    assert repo.get_approval(aid).status == decision
+    assert state_of(cid) not in (S.CONTACTED, S.INTERVIEWING)  # nothing ran, nothing moved on
+
+
+@pytest.mark.parametrize("action", [A.send_followup, A.schedule_interview])
+async def test_ceo_approval_of_a_different_action_cannot_authorize_this_one(db, action):
+    """An approved send_outreach row must not unlock a send_followup / schedule_interview."""
+    job = make_job()
+    state = S.CONTACTED if action == A.send_followup else S.INTERESTED
+    cid = make_candidate(job, state)
+    aid = repo.create_approval(job, cid, A.send_outreach, dict(APPROVED_PAYLOAD), "why")
+    repo.decide_approval(aid, True)
+    tools = tools_with()
+    await graph.run_event(event(job, E.Tick, cid), tools=tools,
+                          llm=scripted(action, subject="s", body="b", questions=["q"]))
+    assert tools.email.sent == [] and tools.elevenlabs.calls == []
+    assert repo.get_approval(aid).status == "approved"
