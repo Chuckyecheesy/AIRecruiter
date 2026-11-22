@@ -4,6 +4,7 @@ import type { FC } from "react";
 import { useJobStore } from "@/lib/store";
 import { PIPELINE_COLUMNS, type Candidate } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { CandidateAvatar } from "./CandidateAvatar";
 
 const STATE_LABEL: Record<string, string> = {
   DISCOVERED: "Found",
@@ -44,21 +45,26 @@ const Card: FC<{ c: Candidate }> = ({ c }) => {
         aria-pressed={active}
         title={active ? "Show everyone in the thread" : `Show only ${c.name} in the thread`}
       >
-        <span className="flex items-baseline justify-between gap-2">
-          <span className="truncate font-medium text-ink">{c.name}</span>
-          {c.score != null && <span className="font-mono text-xs tabular-nums text-quiet">{c.score}</span>}
-        </span>
-        {c.headline && <span className="block truncate text-xs text-quiet">{c.headline}</span>}
-        <span className="mt-1 flex items-center gap-1.5 text-xs">
-          <span className={cn(c.needsHuman ? "text-danger" : c.pendingApprovalId ? "text-gate" : "text-quiet")}>
-            {c.pendingApprovalId && !c.needsHuman ? "Waiting for you" : STATE_LABEL[c.state]}
+        <span className="flex gap-2.5">
+          <CandidateAvatar name={c.name} size={34} className="mt-0.5" />
+          <span className="block min-w-0 flex-1">
+            <span className="flex items-baseline justify-between gap-2">
+              <span className="truncate font-medium text-ink">{c.name}</span>
+              {c.score != null && <span className="font-mono text-xs tabular-nums text-quiet">{c.score}</span>}
+            </span>
+            {c.headline && <span className="block truncate text-xs text-quiet">{c.headline}</span>}
+            <span className="mt-1 flex items-center gap-1.5 text-xs">
+              <span className={cn(c.needsHuman ? "text-danger" : c.pendingApprovalId ? "text-gate" : "text-quiet")}>
+                {c.pendingApprovalId && !c.needsHuman ? "Waiting for you" : STATE_LABEL[c.state]}
+              </span>
+            </span>
           </span>
         </span>
       </button>
       <button
         type="button"
         onClick={() => openDrawer(c.id)}
-        className="mt-1 text-xs text-agent underline-offset-2 hover:underline"
+        className="mt-1 ml-[44px] text-xs text-agent underline-offset-2 hover:underline"
       >
         Details
       </button>

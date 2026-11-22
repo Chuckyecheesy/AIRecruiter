@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState, type FC } from "react";
 import { api } from "@/lib/api";
+import { useJobStore } from "@/lib/store";
 import type { JobDetail, ShortlistEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { CandidateAvatar } from "./CandidateAvatar";
+import { CandidateDrawer } from "./CandidateDrawer";
 import { TopBar } from "./TopBar";
 import { EvaluationBody } from "./tool-uis";
 
@@ -27,6 +30,7 @@ export const Shortlist: FC<{ jobId: string }> = ({ jobId }) => {
   const [rows, setRows] = useState<ShortlistEntry[] | null>(null);
   const [copied, setCopied] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const openDrawer = useJobStore((s) => s.openDrawer);
 
   useEffect(() => {
     Promise.all([api.getJob(jobId), api.shortlist(jobId)])
@@ -62,21 +66,36 @@ export const Shortlist: FC<{ jobId: string }> = ({ jobId }) => {
           </button>
         )}
       </div>
+      <p className="mt-3 max-w-xl text-quiet">
+        Everyone the recruiter has interviewed and scored, best first.{" "}
+        {job ? `Shortlisted means they cleared your bar of ${job.scoreThreshold}.` : ""} Click a name for their full profile.
+      </p>
       {err && <p className="mt-6 text-danger">{err}</p>}
       {rows && rows.length === 0 && <p className="mt-6 text-quiet">Nobody has been evaluated yet. Candidates appear here after their interview is scored.</p>}
       <ol className="mt-6 grid gap-4">
         {rows?.map(({ candidate: c, evaluation: e }, i) => (
           <li key={c.id} className={cn("rounded-2xl border bg-surface p-6", c.state === "SHORTLISTED" ? "border-ok/40" : "border-line")}>
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="text-xl font-semibold text-ink">
-                <span className="mr-2 font-mono text-base tabular-nums text-quiet">{String(i + 1).padStart(2, "0")}</span>
-                {c.name}
-              </h2>
-              <span className={cn("text-sm", c.state === "SHORTLISTED" ? "text-ok" : "text-quiet")}>
-                {c.state === "SHORTLISTED" ? "Shortlisted" : "Evaluated, below the bar"}
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => openDrawer(c.id)}
+                className="group flex min-w-0 items-center gap-3.5 text-left"
+                aria-label={`Open ${c.name}'s profile`}
+              >
+                <span className="font-mono text-sm tabular-nums text-quiet">{String(i + 1).padStart(2, "0")}</span>
+                <CandidateAvatar name={c.name} size={48} className="transition group-hover:ring-ink/30" />
+                <span className="min-w-0">
+                  <span className="font-display block truncate text-xl font-semibold text-ink underline-offset-4 group-hover:underline">{c.name}</span>
+                  {c.headline && <span className="block truncate text-sm text-quiet">{c.headline}</span>}
+                </span>
+              </button>
+              <span className="flex shrink-0 items-center gap-3">
+                {c.score != null && !e && <span className="font-display text-2xl font-semibold tabular-nums text-ink">{c.score}</span>}
+                <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium", c.state === "SHORTLISTED" ? "bg-ok/10 text-ok" : "bg-sunk text-quiet")}>
+                  {c.state === "SHORTLISTED" ? "Shortlisted" : "Below the bar"}
+                </span>
               </span>
             </div>
-            {c.headline && <p className="text-sm text-quiet">{c.headline}</p>}
             {e && (
               <div className="mt-4">
                 <EvaluationBody evaluation={e} threshold={job?.scoreThreshold} />
@@ -86,6 +105,7 @@ export const Shortlist: FC<{ jobId: string }> = ({ jobId }) => {
         ))}
       </ol>
     </main>
+    <CandidateDrawer />
     </>
   );
 };

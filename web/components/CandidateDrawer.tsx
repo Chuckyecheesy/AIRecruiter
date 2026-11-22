@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useJobStore } from "@/lib/store";
 import type { CandidateDetail, Disposition } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { CandidateAvatar, profilePhoto } from "./CandidateAvatar";
 import { EvaluationBody } from "./tool-uis";
 
 const TABS = ["Memory", "Timeline", "Conversation", "Interview", "Evaluation"] as const;
@@ -31,9 +32,12 @@ export const CandidateDrawer: FC = () => {
       <aside className="relative flex h-full w-full max-w-xl flex-col border-l border-line bg-canvas shadow-[-24px_0_60px_-30px_rgba(43,36,32,0.35)]">
         <header className="border-b border-line px-5 pt-4">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold text-ink">{detail?.name ?? "Loading…"}</h2>
-              {detail?.headline && <p className="truncate text-sm text-quiet">{detail.headline}</p>}
+            <div className="flex min-w-0 items-center gap-3.5">
+              {detail && <CandidateAvatar name={detail.name} src={profilePhoto(detail.memory?.profile)} size={52} />}
+              <div className="min-w-0">
+                <h2 className="truncate text-xl font-semibold text-ink">{detail?.name ?? "Loading…"}</h2>
+                {detail?.headline && <p className="truncate text-sm text-quiet">{detail.headline}</p>}
+              </div>
             </div>
             <button type="button" onClick={() => close(null)} className="rounded px-2 py-1 text-sm text-quiet hover:bg-canvas">
               Close

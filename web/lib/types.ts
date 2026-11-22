@@ -238,6 +238,6 @@ export const PIPELINE_COLUMNS: { title: string; states: CandidateState[] }[] = [
   { title: "Sourcing", states: ["DISCOVERED", "RESEARCHED", "CONTACT_FOUND"] },
   { title: "Outreach", states: ["OUTREACH_DRAFTED", "APPROVED", "CONTACTED"] },
   { title: "Interview", states: ["INTERESTED", "INTERVIEWING", "INTERVIEWED"] },
-  { title: "Decision", states: ["EVALUATED", "SHORTLISTED"] },
+  { title: "Scored", states: ["EVALUATED", "SHORTLISTED"] },
   { title: "Closed", states: ["REJECTED", "DECLINED", "STALE"] },
 ];
