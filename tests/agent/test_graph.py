@@ -253,7 +253,8 @@ async def test_transient_backoff_is_1_2_4_seconds(db, job, monkeypatch):
     assert slept[:3] == [1, 2, 4]
 
 
-@pytest.mark.parametrize("kind", ["not_found", "invalid_input", "fatal"])
+# not_found / invalid_input are covered in test_reliability.py
+@pytest.mark.parametrize("kind", ["fatal"])
 async def test_non_retryable_errors_escalate_immediately(db, job, kind):
     cid = repo.create_candidate(job, "p1", "Ada")
     ploid = FakePloid(enrich_errors=[ToolError(kind)] * 5)

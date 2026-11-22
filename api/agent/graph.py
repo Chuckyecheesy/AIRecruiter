@@ -29,6 +29,7 @@ from api.contracts import (
     JobState, PermissionClass,
 )
 from api.db import repo
+from api.observability import langfuse as tracing
 from api.tools.base import ToolError
 from api.config import settings
 from api.tools.models import Message, SearchCriteria
@@ -38,6 +39,9 @@ DEFAULT_CHECKPOINT_DB = "data/checkpoints.db"
 MAX_RETRIES = 3
 TRANSIENT_BACKOFF_S = (1, 2, 4)
 RATE_LIMIT_CAP_S = 30
+# not_found is normally recorded and the agent re-decides from memory. These actions have no
+# alternative next step (the event is the only trigger), so a not_found there needs a human.
+NOT_FOUND_ESCALATES = frozenset({A.process_interview})
 
 
 _SERDE = JsonPlusSerializer(allowed_msgpack_modules=[
@@ -66,6 +70,9 @@ class AgentState(TypedDict, total=False):
     route: str          # observe/decide/permission_check/execute decide the next hop
     escalate_reason: str
     escalate_extra: dict
+    tool_redecided: bool    # an invalid_input tool error already used the one re-decide
+    redecide_error: Optional[str]
+    trace_url: Optional[str]
 
 
 def thread_id_for(job_id: str, candidate_id: Optional[str] = None) -> str:
@@ -352,7 +359,8 @@ class _Deps:
         self.tools, self.llm = tools, llm
 
 
-def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
+def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
+                trace: tracing.RunTrace = tracing.NOOP):
     deps = _Deps(tools, llm)
 
     async def observe(st: AgentState) -> dict:
@@ -383,8 +391,11 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         if ev.type == E.ApprovalGranted:
             # Execute exactly what the CEO approved; the LLM is not consulted.
             ap = repo.get_approval(ev.payload.get("approval_id") or "")
-            if (ap is None or ap.status != "approved" or ap.candidate_id != cid
-                    or ap.action not in out["valid_actions"]):
+            if ap is not None and ap.status == "executed" and _send_result_recorded(ev, ap):
+                ap_ok = True  # crashed after the send, before the state update: finish, don't re-send
+            else:
+                ap_ok = ap is not None and ap.status == "approved"
+            if (not ap_ok or ap.candidate_id != cid or ap.action not in out["valid_actions"]):
                 out["route"] = "end"  # replay, rejected, already executed, or no longer applicable
             else:
                 out.update(approval=ap, route="execute", decision=Decision(
@@ -404,7 +415,9 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
             from api.config import settings
             llm = make_llm(settings.llm_mode, ctx)
         state = S(st["candidate"]["state"]) if st.get("candidate") else "job"
-        outcome = await decide_validated(llm, state, st["job"], valid=st["valid_actions"])
+        llm = _traced_llm(llm, trace)
+        outcome = await decide_validated(llm, state, st["job"], valid=st["valid_actions"],
+                                         error=st.get("redecide_error"))
         if outcome.escalate:
             return {"decide_attempts": outcome.attempts, "route": "escalate",
                     "escalate_reason": f"invalid decision twice: {outcome.error}"}
@@ -417,6 +430,8 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
 
     async def permission_check(st: AgentState) -> dict:
         d, cid = st["decision"], st["candidate_id"]
+        if (refusal := _refuse_duplicate_send(st)) is not None:
+            return refusal  # don't even ask the CEO to approve a send that would be refused
         verdict = check_permission(d.action, st["job"].get("permission_policy"))
         if verdict == Verdict.allow:
             return {"route": "execute"}
@@ -448,6 +463,8 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         prior = repo.get_tool_call(key)
         if prior and prior["status"] == "ok":  # event replayed after a crash: don't re-run
             return {"result": prior["output"], "route": "update_state"}
+        if (refusal := _refuse_duplicate_send(st)) is not None:  # approvals skip permission_check
+            return refusal
         tools = deps.tools
         if tools is None:
             from api.tools import get_tools
@@ -468,6 +485,15 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         except PermissionDenied:
             return {"route": "end"}
         except ToolError as e:
+            if e.kind == "invalid_input" and not st.get("tool_redecided") and st.get("approval") is None:
+                # Counts as a decide-error: one re-decide with the tool's complaint, then escalate.
+                return {"tool_redecided": True, "decision": None, "route": "decide",
+                        "redecide_error": f"{d.action.value} was rejected by the tool: {e}"}
+            if e.kind == "not_found" and st.get("candidate_id") and d.action not in NOT_FOUND_ESCALATES:
+                # No retry, no escalation: leave a note; the next decision starts from memory.
+                notes = {**st["memory"].research_notes, f"{d.action.value}_error": f"not_found: {e}"}
+                repo.update_memory(st["candidate_id"], research_notes=notes)
+                return {"error": {"kind": e.kind, "message": str(e)}, "route": "end"}
             return _fail(st, e, getattr(e, "attempts", 1))
         return {"result": result, "route": "update_state"}
 
@@ -477,7 +503,9 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         while True:
             attempt += 1
             try:
-                result = await fn(tools, st)
+                with trace.span(d.action.value, kind="tool", input=d.args) as sp:
+                    result = await fn(tools, st)
+                    sp.set_output(result)
             except ToolError as e:
                 delay = _retry_delay(e, attempt)
                 if delay is None:
@@ -536,6 +564,7 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         elif action == A.evaluate_candidate:
             ev = result["evaluation"]
             repo.add_evaluation(cid, job["id"], ev)
+            trace.score("evaluation_score", ev["score"])
             repo.emit_event(job["id"], E.Evaluated, cid, {
                 "score": ev["score"], "recommendation": ev["recommendation"]})
 
@@ -554,19 +583,21 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
     async def escalate(st: AgentState) -> dict:
         reason = st.get("escalate_reason") or "escalated"
         if st.get("candidate_id"):
-            repo.escalate_candidate(st["candidate_id"], reason, extra=st.get("escalate_extra"))
+            repo.escalate_candidate(st["candidate_id"], reason, trace_url=st.get("trace_url"),
+                                    extra=st.get("escalate_extra"))
         else:
-            repo.emit_event(st["job_id"], E.Escalated, None, {"reason": reason})
+            repo.emit_event(st["job_id"], E.Escalated, None,
+                            {"reason": reason, "trace_url": st.get("trace_url")})
         return {}
 
     g = StateGraph(AgentState)
     for name, fn in [("observe", observe), ("decide", decide), ("permission_check", permission_check),
                      ("execute", execute), ("update_state", update_state), ("escalate", escalate)]:
-        g.add_node(name, fn)
+        g.add_node(name, _traced_node(name, fn, trace))
     g.add_edge(START, "observe")
     for src, targets in {
         "observe": {"decide", "execute", "escalate"}, "decide": {"permission_check", "escalate"},
-        "permission_check": {"execute"}, "execute": {"update_state", "escalate"},
+        "permission_check": {"execute"}, "execute": {"update_state", "escalate", "decide"},
     }.items():
         g.add_conditional_edges(
             src, lambda s, ok=targets: s["route"] if s["route"] in ok else END,
@@ -574,6 +605,66 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
     g.add_edge("update_state", END)
     g.add_edge("escalate", END)
     return g.compile(checkpointer=checkpointer)
+
+
+def _send_result_recorded(ev: Event, ap: Any) -> bool:
+    """Did this event already run the approved action successfully (tool result on record)?"""
+    prior = repo.get_tool_call(f"{ev.id}:{ap.action.value}:{ap.candidate_id}")
+    return bool(prior and prior["status"] == "ok")
+
+
+def _duplicate_send_reason(mem: CandidateMemory, d: Decision) -> Optional[str]:
+    """Did we already contact this person? (specs/04-data-model.md rule 3)"""
+    sent = [e for e in mem.contact_log if e.get("kind") == "email_out"]
+    if d.action == A.send_outreach and sent:
+        return f"already contacted ({len(sent)} email sent, last {sent[-1].get('ts')})"
+    if d.action == A.send_followup and any(
+            e.get("subject") == d.args.get("subject") and e.get("body") == d.args.get("body")
+            for e in sent):
+        return "an identical message was already sent"
+    return None
+
+
+def _refuse_duplicate_send(st: AgentState) -> Optional[dict]:
+    """Refuse a duplicate send: nothing is sent, the refusal is logged, the run ends."""
+    d, cid = st["decision"], st.get("candidate_id")
+    if cid is None or d.action not in (A.send_outreach, A.send_followup):
+        return None
+    reason = _duplicate_send_reason(repo.get_memory(cid), d)  # fresh: a send may have landed since observe
+    if reason is None:
+        return None
+    outcome = f"refused: {reason}"
+    state = S(repo.get_candidate(cid)["state"])
+    if d.action == A.send_outreach and state in (S.OUTREACH_DRAFTED, S.APPROVED):
+        repo.set_candidate_state(cid, S.CONTACTED)  # they were contacted already: don't re-draft or re-ask
+        outcome += f" ({state.value} -> CONTACTED)"
+    repo.append_decision(cid, {"ts": repo.now_iso(), "action": d.action.value,
+                               "reasoning": d.reasoning, "outcome": outcome})
+    return {"route": "end"}
+
+
+def _traced_node(name: str, fn, trace: tracing.RunTrace):
+    async def run(st: AgentState) -> dict:
+        with trace.span(name) as sp:
+            out = await fn(st)
+            sp.set_output({"route": out.get("route")} if isinstance(out, dict) else None)
+            return out
+    return run
+
+
+def _traced_llm(llm, trace: tracing.RunTrace):
+    """One `generation` per decide call, scored decision_valid (1 = the action was offered)."""
+    async def call(valid, error=None):
+        names = [a.value for a in valid]
+        with trace.span("decide", kind="generation",
+                        input={"valid_actions": names, "error": error}) as g:
+            d = await llm(valid, error)
+            g.set_output({"action": d.action.value, "reasoning": d.reasoning})
+        ok = d.action in valid
+        trace.score("decision_valid", 1 if ok else 0,
+                    None if ok else f"{d.action.value} not in valid actions")
+        return d
+    return call
 
 
 def _retry_delay(e: ToolError, attempt: int) -> Optional[float]:
@@ -625,10 +716,18 @@ async def run_event(
         repo.finish_run(run_id, "error", None, "candidate locked by another owner")
         raise repo.LockBusy(f"candidate {cid} is locked by another owner")
     status, err, final = "ok", None, {}
+    trace = tracing.NOOP
+    try:
+        cand = repo.get_candidate(cid) if cid else None
+        trace = await asyncio.to_thread(  # may do network I/O; keep it off the event loop
+            tracing.start_run_trace, job_id=event.job_id, candidate_id=cid, state=cand["state"] if cand else "job",
+            event_type=event.type.value)
+    except Exception:  # noqa: BLE001 - tracing is best-effort
+        pass
     try:
         async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
             saver.serde = _SERDE
-            app = build_graph(tools, llm, saver)
+            app = build_graph(tools, llm, saver, trace)
             tid = thread_id_for(event.job_id, cid)
             final = await app.ainvoke(
                 # The thread is reused for every event of a candidate and LangGraph restores the
@@ -636,7 +735,8 @@ async def run_event(
                 {"job_id": event.job_id, "candidate_id": cid, "event": event,
                  "decide_attempts": 0, "run_id": run_id, "route": "decide",
                  "decision": None, "result": None, "error": None, "approval": None,
-                 "escalate_reason": "", "escalate_extra": {}, "valid_actions": []},
+                 "escalate_reason": "", "escalate_extra": {}, "valid_actions": [],
+                 "tool_redecided": False, "redecide_error": None, "trace_url": trace.url},
                 config={"configurable": {"thread_id": tid}})
             # Finished cleanly: drop this thread's history. Checkpoints of a crashed run stay.
             await saver.adelete_thread(tid)
@@ -649,8 +749,10 @@ async def run_event(
     finally:
         if lock_owner:
             await asyncio.to_thread(repo.release_lock, cid, lock_owner)
+        await asyncio.to_thread(trace.flush)
         d = final.get("decision")
-        repo.finish_run(run_id, status, d.action.value if d else None, err)
+        repo.finish_run(run_id, status, d.action.value if d else None, err,
+                        trace_url=trace.url, trace_id=trace.trace_id)
 
 
 async def handle_event(event: Event, owner: Optional[str] = None) -> None:
