@@ -311,8 +311,14 @@ async def _instant_sleep(*a, **k):
     return None
 
 
-async def test_state_does_not_leak_between_runs_on_the_same_thread(db, job):
+async def test_state_does_not_leak_between_runs_on_the_same_thread(db, job, monkeypatch):
     """The thread id is per candidate, so LangGraph restores the last checkpoint each run."""
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    async def keep(self, thread_id):  # disable pruning so the old checkpoint is really restored
+        return None
+
+    monkeypatch.setattr(AsyncSqliteSaver, "adelete_thread", keep)
     cid = repo.create_candidate(job, "p1", "Ada")
     tools = tools_with(FakePloid(enrich_errors=[ToolError("fatal")]))
     first = await graph.run_event(_event(job, E.CandidateFound, cid), tools=tools,
@@ -325,3 +331,38 @@ async def test_state_does_not_leak_between_runs_on_the_same_thread(db, job):
     with repo.get_conn() as c:
         st = [r["status"] for r in c.execute("SELECT status FROM agent_runs ORDER BY started_at, id")]
     assert st == ["error", "ok"]
+
+
+async def test_checkpoints_pruned_after_clean_run(db, job, tmp_path):
+    ck = tmp_path / "ck.db"
+    cid = repo.create_candidate(job, "p1", "Ada")
+    for _ in range(2):
+        await graph.run_event(_event(job, E.CandidateFound, cid), tools=tools_with(FakePloid()),
+                              llm=scripted_llm(A.enrich_candidate), checkpoint_path=ck)
+    n = sqlite3.connect(ck).execute("select count(*) from checkpoints").fetchone()[0]
+    assert n == 0
+
+
+async def test_crashed_run_keeps_its_checkpoint(db, job, tmp_path):
+    ck = tmp_path / "ck.db"
+    cid = repo.create_candidate(job, "p1", "Ada")
+
+    class Boom(FakePloid):
+        async def enrich(self, ploid_id):
+            raise RuntimeError("process died")
+
+    with pytest.raises(RuntimeError):
+        await graph.run_event(_event(job, E.CandidateFound, cid), tools=tools_with(Boom()),
+                              llm=scripted_llm(A.enrich_candidate), checkpoint_path=ck)
+    assert sqlite3.connect(ck).execute("select count(*) from checkpoints").fetchone()[0] > 0
+    assert repo.get_candidate(cid)["locked_by"] is None  # lock still released
+
+
+async def test_run_refuses_a_candidate_locked_by_someone_else(db, job):
+    cid = repo.create_candidate(job, "p1", "Ada")
+    assert repo.acquire_lock(cid, "other-worker")
+    with pytest.raises(repo.LockBusy):
+        await graph.run_event(_event(job, E.CandidateFound, cid), tools=tools_with(FakePloid()),
+                              llm=scripted_llm(A.enrich_candidate))
+    assert repo.get_candidate(cid)["state"] == "DISCOVERED"
+    assert repo.get_candidate(cid)["locked_by"] == "other-worker"

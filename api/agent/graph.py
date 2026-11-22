@@ -8,7 +8,6 @@ Only code applies transitions; the LLM only picks from `valid_actions`.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import time
 from pathlib import Path
@@ -336,22 +335,26 @@ async def run_event(
     path.parent.mkdir(parents=True, exist_ok=True)
     cid = event.candidate_id
     run_id = repo.start_run(event.job_id, cid, event.id)
-    lock = (repo.candidate_lock(cid, f"run-{ULID()}") if cid and owner is None
-            else contextlib.nullcontext())
+    lock_owner = f"run-{ULID()}" if cid and owner is None else None
+    if lock_owner and not await asyncio.to_thread(repo.acquire_lock, cid, lock_owner):
+        repo.finish_run(run_id, "error", None, "candidate locked by another owner")
+        raise repo.LockBusy(f"candidate {cid} is locked by another owner")
     status, err, final = "ok", None, {}
     try:
-        with lock:
-            async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
-                saver.serde = _SERDE
-                app = build_graph(tools, llm, saver)
-                final = await app.ainvoke(
-                    # The thread is reused for every event of a candidate and LangGraph restores the
-                    # last checkpoint, so every per-run field must be reset explicitly.
-                    {"job_id": event.job_id, "candidate_id": cid, "event": event,
-                     "decide_attempts": 0, "run_id": run_id, "route": "decide",
-                     "decision": None, "result": None, "error": None, "approval": None,
-                     "escalate_reason": "", "valid_actions": []},
-                    config={"configurable": {"thread_id": thread_id_for(event.job_id, cid)}})
+        async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
+            saver.serde = _SERDE
+            app = build_graph(tools, llm, saver)
+            tid = thread_id_for(event.job_id, cid)
+            final = await app.ainvoke(
+                # The thread is reused for every event of a candidate and LangGraph restores the
+                # last checkpoint, so every per-run field must be reset explicitly.
+                {"job_id": event.job_id, "candidate_id": cid, "event": event,
+                 "decide_attempts": 0, "run_id": run_id, "route": "decide",
+                 "decision": None, "result": None, "error": None, "approval": None,
+                 "escalate_reason": "", "valid_actions": []},
+                config={"configurable": {"thread_id": tid}})
+            # Finished cleanly: drop this thread's history. Checkpoints of a crashed run stay.
+            await saver.adelete_thread(tid)
         if final.get("error") or final.get("route") == "escalate":
             status = "error"
         return {**final, "run_id": run_id}
@@ -359,6 +362,8 @@ async def run_event(
         status, err = "error", repr(e)
         raise
     finally:
+        if lock_owner:
+            await asyncio.to_thread(repo.release_lock, cid, lock_owner)
         d = final.get("decision")
         repo.finish_run(run_id, status, d.action.value if d else None, err)
 
