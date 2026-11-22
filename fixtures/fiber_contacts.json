@@ -1,0 +1,44 @@
+{
+  "pl_001": {
+    "email": "sarah.chen@example.com",
+    "phone": null,
+    "confidence": 0.93,
+    "source": "fiber-mock"
+  },
+  "pl_002": {
+    "email": "marcus.okafor@example.com",
+    "phone": "+1-416-555-0102",
+    "confidence": 0.88,
+    "source": "fiber-mock"
+  },
+  "pl_006": {
+    "email": "sarah.chen@example.com",
+    "phone": null,
+    "confidence": 0.6,
+    "source": "fiber-mock"
+  },
+  "pl_003": {
+    "email": "priya.raman@example.com",
+    "phone": null,
+    "confidence": 0.81,
+    "source": "fiber-mock"
+  },
+  "pl_005": {
+    "email": "lena.fischer@example.com",
+    "phone": null,
+    "confidence": 0.55,
+    "source": "fiber-mock"
+  },
+  "pl_004": {
+    "email": "diego.alvarez@example.com",
+    "phone": null,
+    "confidence": 0.77,
+    "source": "fiber-mock"
+  },
+  "pl_007": {
+    "email": "tom.becker@example.com",
+    "phone": null,
+    "confidence": 0.7,
+    "source": "fiber-mock"
+  }
+}

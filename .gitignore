@@ -1,6 +1,53 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-data/
+# Secrets (keep .env.example committed)
 .env
+.env.*
+!.env.example
+
+# Data / SQLite
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Playwright
+playwright-report/
+test-results/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
+
+# Claude Code local settings / graphify output
+.claude/settings.local.json
+graphify-out/
+
+# Local per-person Claude agent notes (person-a)
+.claude-agent/person-a/

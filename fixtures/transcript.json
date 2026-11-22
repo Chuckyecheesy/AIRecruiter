@@ -1,0 +1,55 @@
+{
+  "duration_s": 412,
+  "turns": [
+    {
+      "role": "agent",
+      "text": "Hi, thanks for joining. Can you walk me through a retrieval system you've built end to end?",
+      "t_s": 0
+    },
+    {
+      "role": "candidate",
+      "text": "Sure. The AI Study Assistant ingests lecture notes, chunks them by heading, embeds with a hosted embedding model and stores them in pgvector. At query time we do hybrid search, rerank the top 20, and pass the top 5 to Claude with citations.",
+      "t_s": 6
+    },
+    {
+      "role": "agent",
+      "text": "How did you evaluate retrieval quality?",
+      "t_s": 48
+    },
+    {
+      "role": "candidate",
+      "text": "I built a set of about 150 question and answer pairs from past exams and tracked recall at 5 and answer faithfulness. Moving from fixed-size chunks to heading-based chunks took recall at 5 from 0.71 to 0.86.",
+      "t_s": 53
+    },
+    {
+      "role": "agent",
+      "text": "What would you do differently in TypeScript versus Python for this stack?",
+      "t_s": 110
+    },
+    {
+      "role": "candidate",
+      "text": "The web app and streaming UI are TypeScript with Next.js. I kept ingestion in TypeScript too so there's one type system, but I'd move heavy batch embedding to a Python worker if volume grew.",
+      "t_s": 116
+    },
+    {
+      "role": "agent",
+      "text": "Tell me about a time a model output caused a production problem.",
+      "t_s": 190
+    },
+    {
+      "role": "candidate",
+      "text": "Early on the bot answered confidently when retrieval returned nothing relevant. I added a relevance threshold and a 'not in your notes' response, and logged those cases to improve coverage.",
+      "t_s": 196
+    },
+    {
+      "role": "agent",
+      "text": "Great, that's all my questions. Anything you'd like to ask?",
+      "t_s": 380
+    },
+    {
+      "role": "candidate",
+      "text": "Just what the team's eval process looks like today. Thanks!",
+      "t_s": 386
+    }
+  ]
+}
