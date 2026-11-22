@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
 from typing import Awaitable, Callable, Optional
 
 from ulid import ULID
 
-from api.contracts import Event
+from api.contracts import Event, EventType
 from api.db import repo
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class Dispatcher:
         max_attempts: int = 3,
         on_exhausted: Optional[ExhaustedHook] = None,
         owner: Optional[str] = None,
+        tick_interval: Optional[float] = None,
     ) -> None:
         if max_concurrent is None:
             from api.config import settings
@@ -46,6 +48,8 @@ class Dispatcher:
         self.max_attempts = max_attempts
         self.on_exhausted = on_exhausted
         self.owner = owner or f"dispatcher-{ULID()}"
+        self.tick_interval = tick_interval
+        self._last_tick = time.monotonic()  # first Tick after one interval
         self._sem = asyncio.Semaphore(max_concurrent)
 
     async def run_once(self) -> int:
@@ -94,12 +98,26 @@ class Dispatcher:
     async def run_forever(self) -> None:
         while True:
             try:
+                if self.tick_interval and time.monotonic() - self._last_tick >= self.tick_interval:
+                    self._last_tick = time.monotonic()
+                    await asyncio.to_thread(emit_ticks)
                 n = await self.run_once()
             except Exception:  # noqa: BLE001 - the loop must survive DB hiccups
                 log.exception("dispatcher cycle failed")
                 n = 0
             if n < self.batch_size:
                 await asyncio.sleep(self.poll_interval)
+
+
+def emit_ticks() -> list[str]:
+    """One job-level Tick per ACTIVE job, unless one is already waiting. Returns the jobs ticked."""
+    ticked = []
+    for job_id in repo.active_job_ids():
+        if repo.has_pending_event(job_id, EventType.Tick):
+            continue
+        repo.emit_event(job_id, EventType.Tick)
+        ticked.append(job_id)
+    return ticked
 
 
 _task: Optional[asyncio.Task] = None
@@ -120,9 +138,10 @@ def start_dispatcher(handler: Optional[Handler] = None, **kwargs) -> None:
 
         async def handler(event: Event) -> None:  # the dispatcher already holds the candidate lock
             await handle_event(event, owner=owner)
+    from api.config import settings
     if "job_id" not in kwargs:
-        from api.config import settings
         kwargs["job_id"] = settings.job_id
+    kwargs.setdefault("tick_interval", settings.tick_interval_s)
     n_events = repo.reset_stuck_events()
     n_locks = repo.release_stale_locks()
     if n_events or n_locks:

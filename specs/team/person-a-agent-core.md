@@ -35,25 +35,25 @@
 - [x] **Sync 1:10:** run a mock job and show all candidates in `OUTREACH_DRAFTED`
 
 ## 1:10-1:40 Permission layer → checkpoint: approve → `CONTACTED` → `INTERESTED`
-- [ ] `permissions.py`: capability matrix, per-job policy, `auto_approve` / `auto_approve_actions`
-- [ ] `reject_candidate_proposal` is never auto-approved unless it is listed explicitly
-- [ ] Pending approval ends the run and emits `ApprovalRequested`
-- [ ] `ApprovalGranted` → `observe` loads the approval → jump to `execute` with the **stored payload**
-- [ ] `APPROVED` is a durable state between approval and send
-- [ ] Approval executes at most once (atomic `approved → executed`)
-- [ ] Defense in depth: restricted execution asserts `approval.status == approved`
-- [ ] After `send_outreach`: write the `messages` row and `contact_log`, emit `EmailSent`, pick a disposition (or the pinned `demo_disposition`), call `persona.reply`, insert a delayed `EmailReplied` (`not_before`). `no_reply` inserts nothing
-- [ ] `process_reply` classification → `INTERESTED` / `DECLINED` / `draft_reply`
-- [ ] **Test:** calling a restricted tool directly without an approval is refused
+- [x] `permissions.py`: capability matrix, per-job policy, `auto_approve` / `auto_approve_actions`
+- [x] `reject_candidate_proposal` is never auto-approved unless it is listed explicitly
+- [x] Pending approval ends the run and emits `ApprovalRequested`
+- [x] `ApprovalGranted` → `observe` loads the approval → jump to `execute` with the **stored payload**
+- [x] `APPROVED` is a durable state between approval and send
+- [x] Approval executes at most once (atomic `approved → executed`)
+- [x] Defense in depth: restricted execution asserts `approval.status == approved`
+- [x] After `send_outreach`: write the `messages` row and `contact_log`, emit `EmailSent`, pick a disposition (or the pinned `demo_disposition`), call `persona.reply`, insert a delayed `EmailReplied` (`not_before`). `no_reply` inserts nothing
+- [x] `process_reply` classification → `INTERESTED` / `DECLINED` / `draft_reply`
+- [x] **Test:** calling a restricted tool directly without an approval is refused
 - [ ] **Sync 1:40**
 
 ## 1:40-2:50 Remaining lifecycle (C is building the UI meanwhile)
-- [ ] `Tick` every 15s per ACTIVE job: one follow-up after N hours, then `mark_stale` after M hours (shorten these in demo config), and job completion check
-- [ ] `schedule_interview` → persist `interviews` row → `INTERVIEWING`
-- [ ] `InterviewDone` → `process_interview` → `INTERVIEWED` → `evaluate_candidate` → `evaluations` row, `candidates.score`, `Evaluated`
-- [ ] `shortlist` if score ≥ threshold, else `reject_candidate_proposal`, `borderline` → `NEEDS_HUMAN`
-- [ ] Re-plan on rejection: redraft with feedback (max 3), interview rejected twice → escalate, rejection overridden → back to `EVALUATED`
-- [ ] `HumanResolved` → resume from `prev_state`; `STALE` reactivate → `CONTACTED`
+- [x] `Tick` every 15s per ACTIVE job: one follow-up after N hours, then `mark_stale` after M hours (shorten these in demo config), and job completion check
+- [x] `schedule_interview` → persist `interviews` row → `INTERVIEWING`
+- [x] `InterviewDone` → `process_interview` → `INTERVIEWED` → `evaluate_candidate` → `evaluations` row, `candidates.score`, `Evaluated`
+- [x] `shortlist` if score ≥ threshold, else `reject_candidate_proposal`, `borderline` → `NEEDS_HUMAN`
+- [x] Re-plan on rejection: redraft with feedback (max 3), interview rejected twice → escalate, rejection overridden → back to `EVALUATED`
+- [x] `HumanResolved` → resume from `prev_state`; `STALE` reactivate → `CONTACTED`
 - [ ] **Sync 2:50:** the voice interview path works end to end with B
 
 ## 2:50-3:40 Reliability + Langfuse → checkpoint: `NEEDS_HUMAN` with trace link
