@@ -1,0 +1,23 @@
+# Local parity with the Maritime image (spec 07): `docker compose up --build`
+# API on http://localhost:8000 (health: /health). The dashboard still runs with `make web`.
+services:
+  api:
+    build:
+      context: .
+      args:
+        WITH_BROWSER: "false"
+    image: airecruiter-api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # Container paths win over whatever .env says for local runs.
+      DATA_DIR: /data
+      CHECKPOINT_DB: /data/checkpoints.db
+      PORT: "8000"
+    volumes:
+      - airecruiter-data:/data
+    restart: unless-stopped
+
+volumes:
+  airecruiter-data:
