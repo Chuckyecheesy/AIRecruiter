@@ -6,7 +6,7 @@
     "source": "fiber-mock"
   },
   "pl_002": {
-    "email": "marcus@marcusokafor.dev",
+    "email": "marcus.okafor@example.com",
     "phone": "+1-416-555-0102",
     "confidence": 0.88,
     "source": "fiber-mock"
@@ -24,7 +24,7 @@
     "source": "fiber-mock"
   },
   "pl_005": {
-    "email": "lena@example.dev",
+    "email": "lena.fischer@example.com",
     "phone": null,
     "confidence": 0.55,
     "source": "fiber-mock"

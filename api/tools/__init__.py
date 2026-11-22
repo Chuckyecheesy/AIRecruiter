@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, fields
+from datetime import timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -25,6 +27,8 @@ from api.tools.llm import LLM
 from api.tools.persona import LLMCandidatePersona, ReplyClassifier, pick_disposition
 from api.tools.ploid import MockPloidClient, RealPloidClient
 from api.tools.rubric import RubricGenerator
+
+log = logging.getLogger(__name__)
 
 __all__ = ["Tools", "get_tools", "tools_status", "ToolError", "pick_disposition"]
 
@@ -48,15 +52,27 @@ def build_tools(s: Settings) -> Tools:
     status: dict[str, str] = {}
 
     def llm(model: str) -> LLM | None:
-        return LLM(s.llm_api_key, model, provider=s.llm_provider) if s.llm_enabled else None
+        if not s.llm_enabled:
+            return None
+        return LLM(s.anthropic_api_key, model, timeout_s=s.llm_timeout_s, provider=s.llm_provider, settings=s)
 
-    llm_status = f"real ({s.llm_provider})" if s.llm_enabled else "stub"
+    def fallback(tool: str, missing: list[str]) -> str:
+        """A tool set to `real` without credentials falls back to mock, loudly."""
+        if s.mode_for(tool) != "real":
+            return "mock"
+        log.warning("%s: mode is real but %s not set; using MOCK", tool, " / ".join(missing))
+        return f"mock (real requested; missing {', '.join(missing)})"
+
+    llm_status = (f"real ({s.llm_provider}: {s.gemini_model})" if s.llm_provider == "gemini" else "real") \
+        if s.llm_enabled else "stub"
 
     # Ploid
     if s.mode_for("ploid") == "real" and s.ploid_api_key and s.ploid_base_url:
         ploid: Any = RealPloidClient(s.ploid_api_key, s.ploid_base_url); status["ploid"] = "real"
     else:
-        ploid = MockPloidClient(); status["ploid"] = "mock"
+        ploid = MockPloidClient()
+        status["ploid"] = fallback("ploid", [k for k in ("PLOID_API_KEY", "PLOID_BASE_URL")
+                                             if not getattr(s, k.lower())])
 
     # Fiber (always wrapped by the demo-inbox rewrite)
     fiber_api_key = s.fiber_api_key or s.fibre_api_key
@@ -64,7 +80,9 @@ def build_tools(s: Settings) -> Tools:
     if s.mode_for("fiber") == "real" and fiber_api_key and fiber_base_url:
         fiber_inner: Any = RealFiberClient(fiber_api_key, fiber_base_url); status["fiber"] = "real"
     else:
-        fiber_inner = MockFiberClient(); status["fiber"] = "mock"
+        fiber_inner = MockFiberClient()
+        status["fiber"] = fallback("fiber", [k for k in ("FIBER_API_KEY", "FIBER_BASE_URL")
+                                             if not getattr(s, k.lower())])
     fiber: Any = DemoInboxFiber(fiber_inner, s.demo_inbox)
 
     # Browser (stretch)
@@ -72,19 +90,24 @@ def build_tools(s: Settings) -> Tools:
 
     # ElevenLabs
     if s.mode_for("elevenlabs") == "real" and s.elevenlabs_api_key and s.elevenlabs_agent_id:
-        elevenlabs: Any = RealElevenLabsClient(s.elevenlabs_api_key, s.elevenlabs_agent_id,
-                                               s.elevenlabs_webhook_secret, s.elevenlabs_base_url)
+        elevenlabs: Any = RealElevenLabsClient(
+            s.elevenlabs_api_key, s.elevenlabs_agent_id, s.elevenlabs_webhook_secret, s.elevenlabs_base_url,
+            token_secret=s.interview_token_secret, ttl=timedelta(hours=s.interview_ttl_hours))
         status["elevenlabs"] = "real" + (" (poll)" if s.elevenlabs_poll else " (webhook)")
+        if not s.elevenlabs_poll and not s.elevenlabs_webhook_secret:
+            log.warning("elevenlabs: no ELEVENLABS_WEBHOOK_SECRET; every webhook will be rejected (401)")
+            status["elevenlabs"] += " (no webhook secret!)"
     else:
         elevenlabs = MockElevenLabsClient(s.public_base_url, s.mock_interview_delay_s)
-        status["elevenlabs"] = "mock"
+        status["elevenlabs"] = fallback("elevenlabs", [k for k in ("ELEVENLABS_API_KEY", "ELEVENLABS_AGENT_ID")
+                                                       if not getattr(s, k.lower())])
 
     email: Any = EmailSimulator(s.allow_real_email, s.email_allowlist_set); status["email"] = "simulated"
 
     tools = Tools(
         ploid=ploid, fiber=fiber, browser=browser, email=email,
         persona=LLMCandidatePersona(llm(s.model_draft)), elevenlabs=elevenlabs,
-        drafter=Drafter(llm(s.model_draft)), evaluator=Evaluator(llm(s.model_eval)),
+        drafter=Drafter(llm(s.model_draft), company_name=s.company_name, ceo_name=s.ceo_name), evaluator=Evaluator(llm(s.model_eval)),
         rubric=RubricGenerator(llm(s.model_draft)), classifier=ReplyClassifier(llm(s.model_draft)),
         status=status,
     )
@@ -92,8 +115,9 @@ def build_tools(s: Settings) -> Tools:
 
     if s.fail_tool:
         name = s.fail_tool.strip().lower()
-        if not hasattr(tools, name):
-            raise ValueError(f"FAIL_TOOL={s.fail_tool!r} is not a tool name")
+        valid = [f.name for f in fields(Tools) if f.name != "status"]
+        if name not in valid:
+            raise ValueError(f"FAIL_TOOL={s.fail_tool!r} is not a tool name (one of: {', '.join(valid)})")
         setattr(tools, name, FailingTool(getattr(tools, name), name))
         status[name] = f"{status.get(name, '?')} (FAIL_TOOL)"
     return tools

@@ -8,7 +8,7 @@ Full specs are in `specs/` (`00`–`08`). The team split and per-person checklis
 - **Backend:** Python 3.12, FastAPI, LangGraph, SQLite (WAL) + LangGraph `SqliteSaver` (separate file), Pydantic
 - **LLM:** Claude `claude-sonnet-5-5` (decide, draft, persona, evaluate, rubric); model IDs come from config (`MODEL_*`)
 - **Voice:** ElevenLabs Conversational AI. **Tracing:** Langfuse. **Hosting:** Maritime (Docker)
-- **Frontend:** Next.js App Router + Tailwind + shadcn + **assistant-ui** (external store runtime fed by SSE events; approvals render as tool UI cards)
+- **Frontend:** Next.js App Router + Tailwind + shadcn + Zustand (fed by SSE events). Job page = candidate list with approval cards inline + read-only activity feed (no chat)
 
 ## Layout
 ```
@@ -18,7 +18,7 @@ api/db/            schema.sql, repo.py (writes) [A] · queries.py (dashboard rea
 api/observability/ langfuse.py                                                      [A]
 api/tools/         adapters + drafter/evaluator/rubric/persona; config.py           [B]
 api/routes/        webhooks.py [B] · everything else [C];  api/main.py [C]
-web/               assistant-ui dashboard                                           [C]
+web/               Next.js dashboard                                                [C]
 fixtures/ [B]   scripts/ (reset_demo.py, smoke.py) [C]   Dockerfile, .env.example [B]
 ```
 **Only edit files in your own lane** (see `specs/team/README.md`).

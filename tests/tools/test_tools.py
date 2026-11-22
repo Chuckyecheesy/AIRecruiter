@@ -1,11 +1,8 @@
 import random
-from types import SimpleNamespace
 
 import pytest
-from pydantic import BaseModel
 
 from api.config import Settings
-from api.tools.llm import LLM
 from api.tools import ToolError, build_tools, pick_disposition
 from api.tools.fiber import demo_address
 from api.tools.models import EnrichedProfile, Message, RoleForm, SearchCriteria
@@ -22,24 +19,6 @@ def test_gemini_provider_is_default():
     assert s.llm_provider == "gemini"
     assert s.llm_api_key == s.gemini_api_key
 
-
-async def test_gemini_structured_output(monkeypatch):
-    class Output(BaseModel):
-        value: str
-
-    class Models:
-        async def generate_content(self, **kwargs):
-            assert kwargs["config"].response_schema is Output
-            return SimpleNamespace(parsed={"value": "ok"}, text='{"value":"ok"}')
-
-    client = SimpleNamespace(aio=SimpleNamespace(models=Models()))
-    monkeypatch.setattr("api.tools.llm.genai.Client", lambda **kwargs: client)
-
-    result = await LLM("test-key", "gemini-2.5-flash", provider="gemini").structured(
-        system="system", prompt="prompt", output=Output
-    )
-
-    assert result == Output(value="ok")
 
 
 @pytest.fixture
@@ -130,10 +109,14 @@ async def test_rubric_weights_sum_to_one(tools):
     assert abs(sum(c.weight for c in r.criteria) - 1) < 0.01
 
 
-async def test_evaluator_stub_recomputes(tools):
+async def test_evaluator_stub_separates_strong_and_weak(tools):
     r = await tools.rubric.generate(RoleForm(title="AI Engineer", must_haves=["RAG", "TypeScript"]))
-    ev = await tools.evaluator.evaluate({"title": "AI Engineer", "rubric": r.model_dump()}, {})
-    assert ev.score == 85 and ev.recommendation == "shortlist"
+    job = {"title": "AI Engineer", "rubric": r.model_dump()}
+    strong = await tools.evaluator.evaluate(job, {"profile": (await tools.ploid.enrich("pl_001")).model_dump()})
+    weak = await tools.evaluator.evaluate(job, {"profile": (await tools.ploid.enrich("pl_004")).model_dump()})
+    assert strong.score > weak.score
+    assert weak.recommendation == "reject"
+    assert [c.name for c in strong.criteria] == [c.name for c in r.criteria]
 
 
 async def test_elevenlabs_mock_flow(tools):

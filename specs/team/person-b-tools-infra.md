@@ -36,7 +36,7 @@
 - [ ] **Sync 1:40**
 
 ## 1:40-2:50 Voice + evaluation → checkpoint: real voice interview ends in `SHORTLISTED`
-- [ ] Set up the ElevenLabs Conversational AI agent (voice, base prompt), record `ELEVENLABS_AGENT_ID`
+- [x] Set up the ElevenLabs Conversational AI agent (voice, base prompt), record `ELEVENLABS_AGENT_ID`
 - [x] `ElevenLabsClient.create_interview(candidate_id, questions, context)` returns a join URL (rubric questions via dynamic variables or per-session overrides)
 - [x] `get_transcript(conversation_id)`
 - [x] `verify_webhook(headers, body)` (signature check)

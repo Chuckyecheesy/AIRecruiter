@@ -1,0 +1,30 @@
+# Secrets never go into the image: pass them at runtime (--env-file / maritime env set).
+.env
+.env.*
+!.env.example
+
+# Local state and tooling
+.git
+.venv
+venv
+data
+*.db
+*.db-wal
+*.db-shm
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+.vscode
+.idea
+.DS_Store
+.claude
+
+# Not part of the API image (the dashboard deploys separately; tests/specs aren't needed at runtime)
+web
+tests
+specs
+playwright-report
+test-results

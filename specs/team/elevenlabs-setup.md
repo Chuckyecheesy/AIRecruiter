@@ -63,14 +63,28 @@ Hi {{candidate_name}}, thanks for making time! This is a quick five-minute scree
 | `ELEVENLABS_WEBHOOK_SECRET` | from the webhook settings |
 | `ELEVENLABS_POLL` | `true` if the webhook can't reach us |
 
+## Security model
+- The talk-to link is **public and its variables are editable by whoever has it**. So the vars include
+  `interview_token = HMAC(secret, candidate_id|job_id|expires)` and `interview_expires`. A webhook or
+  poll match is only trusted if the token verifies and the call started before expiry. Tampered,
+  foreign or expired calls are ignored (200, logged).
+- **Anyone with the link can read `interview_context`.** Never put the rubric, scoring notes or other
+  candidates' data in it. Keep it to a short role blurb (it's truncated to 1500 chars).
+- In mock mode the webhook rejects everything (401). The mock transcript arrives through the poller.
+- If `ELEVENLABS_MODE=real` but the key or agent id is missing, tools fall back to mock, and `/health`
+  says `mock (real requested; missing …)`.
+- If lane C adds an `X-Demo-Token` check, exempt `/api/webhooks/elevenlabs`.
+
 ## What lane A needs to do (tell William)
-- Call `create_interview(..., job_id=job.id, candidate_name=name)`, so the webhook can route the transcript.
+- Call `create_interview(..., job_id=job.id, candidate_name=name)`. `job_id` is **required** in real
+  mode (`invalid_input` otherwise), since it's part of the signed token.
 - Store `join_url` and `created_at` in `interviews`. `conversation_id` may be `None`.
 - Handle `InterviewDone` with payload `{conversation_id, transcript, source}`, and ignore a duplicate
   if the candidate is no longer `INTERVIEWING` (both the webhook and the poller could fire).
 - If `ELEVENLABS_POLL=true`, or in mock mode, start the poller at app startup:
   `poll_interviews(tools.elevenlabs, get_pending, on_done)`. Here `get_pending` returns
   `PendingInterview(candidate_id, conversation_id, created_at)` for INTERVIEWING candidates, and
-  `on_done(candidate_id, transcript)` emits `InterviewDone`.
+  `on_done(candidate_id, transcript)` emits `InterviewDone`. Optional
+  `on_failed(candidate_id, ToolError)` fires once on a fatal error (e.g. a failed call), so you can escalate.
 - `repo.emit_event("InterviewDone", job_id=..., candidate_id=..., payload=...)` is the signature the
   webhook route calls. Tell me if yours differs.
