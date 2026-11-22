@@ -418,6 +418,9 @@ def resume_candidate(candidate_id: str) -> None:
             raise ValueError(f"cannot resume a candidate in {state.value}")
         c.execute("UPDATE candidates SET state=?, prev_state=NULL, updated_at=? WHERE id=?",
                   (target.value, now_iso(), candidate_id))
+        if state == CandidateState.STALE:  # restart the stale clock
+            _write_memory(c, candidate_id, {"contact_log": _memory(c, candidate_id).contact_log
+                                            + [{"kind": "reactivated", "ts": now_iso()}]})
         _emit(c, r["job_id"], EventType.HumanResolved, candidate_id,
               {"from": state.value, "resumed_to": target.value})
 
@@ -595,11 +598,12 @@ def set_candidate_state(candidate_id: str, state: CandidateState) -> None:
     """Apply a state change decided by `apply_transition` (code only, never the LLM)."""
     with get_conn() as c:
         _candidate_row(c, candidate_id)
-        c.execute("UPDATE candidates SET state=?, updated_at=? WHERE id=?",
+        c.execute("UPDATE candidates SET state=?, prev_state=NULL, updated_at=? WHERE id=?",
                   (CandidateState(state).value, now_iso(), candidate_id))
 
 
-def escalate_candidate(candidate_id: str, reason: str, trace_url: Optional[str] = None) -> bool:
+def escalate_candidate(candidate_id: str, reason: str, trace_url: Optional[str] = None,
+                       extra: Optional[dict[str, Any]] = None) -> bool:
     """-> NEEDS_HUMAN, remembering prev_state; emits Escalated. False if already escalated."""
     with get_conn() as c:
         r = _candidate_row(c, candidate_id)
@@ -609,7 +613,7 @@ def escalate_candidate(candidate_id: str, reason: str, trace_url: Optional[str] 
         c.execute("UPDATE candidates SET state=?, prev_state=?, trace_url=?, updated_at=? WHERE id=?",
                   (CandidateState.NEEDS_HUMAN.value, state.value, trace_url, now_iso(), candidate_id))
         _emit(c, r["job_id"], EventType.Escalated, candidate_id,
-              {"reason": reason, "prev_state": state.value, "trace_url": trace_url})
+              {**(extra or {}), "reason": reason, "prev_state": state.value, "trace_url": trace_url})
         return True
 
 
@@ -696,3 +700,89 @@ def get_pending_approval(candidate_id: str, action: ActionName) -> Optional[Appr
                       " ORDER BY created_at DESC LIMIT 1",
                       (candidate_id, ActionName(action).value)).fetchone()
     return _approval(r) if r else None
+
+
+# ---------- lifecycle support: ticks, interviews, evaluations (lane A) ----------
+
+def active_job_ids() -> list[str]:
+    with get_conn() as c:
+        return [r["id"] for r in c.execute(
+            "SELECT id FROM jobs WHERE state=? ORDER BY created_at, rowid", (JobState.ACTIVE.value,))]
+
+
+def has_pending_event(job_id: str, type: EventType, candidate_id: Optional[str] = None,
+                      due: Optional[str] = None) -> bool:
+    """A not-yet-finished event of this type for the job (job-level when candidate_id is None)."""
+    sql = "SELECT payload FROM events WHERE job_id=? AND type=? AND status IN ('pending','processing')"
+    args: list[Any] = [job_id, EventType(type).value]
+    sql += " AND candidate_id IS NULL" if candidate_id is None else " AND candidate_id=?"
+    if candidate_id is not None:
+        args.append(candidate_id)
+    with get_conn() as c:
+        rows = c.execute(sql, args).fetchall()
+    return any(due is None or json.loads(r["payload"]).get("due") == due for r in rows)
+
+
+def list_candidates(job_id: str) -> list[dict[str, Any]]:
+    with get_conn() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM candidates WHERE job_id=? ORDER BY created_at, rowid", (job_id,))]
+
+
+def count_approvals(candidate_id: str, action: ActionName, status: str) -> int:
+    with get_conn() as c:
+        return c.execute("SELECT count(*) FROM approvals WHERE candidate_id=? AND action=? AND status=?",
+                         (candidate_id, ActionName(action).value, status)).fetchone()[0]
+
+
+def create_interview(candidate_id: str, job_id: str, *, conversation_id: Optional[str],
+                     join_url: Optional[str], questions: list[str],
+                     expires_at: Optional[str] = None) -> str:
+    iid = _new_id()
+    with get_conn() as c:
+        c.execute("INSERT INTO interviews (id, candidate_id, job_id, conversation_id, join_url,"
+                  " expires_at, questions, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                  (iid, candidate_id, job_id, conversation_id, join_url, expires_at,
+                   _dumps(list(questions)), "scheduled", now_iso()))
+    return iid
+
+
+def complete_interview(candidate_id: str, job_id: str, transcript: dict[str, Any]) -> None:
+    """Attach the transcript to the candidate's open interview (creating the row if none exists)."""
+    ts = now_iso()
+    with get_conn() as c:
+        r = c.execute("SELECT id FROM interviews WHERE candidate_id=? AND status!='completed'"
+                      " ORDER BY created_at DESC, rowid DESC LIMIT 1", (candidate_id,)).fetchone()
+        if r is None:
+            iid = _new_id()
+            c.execute("INSERT INTO interviews (id, candidate_id, job_id, conversation_id, status,"
+                      " created_at) VALUES (?,?,?,?,?,?)",
+                      (iid, candidate_id, job_id, transcript.get("conversation_id"), "scheduled", ts))
+        else:
+            iid = r["id"]
+        c.execute("UPDATE interviews SET status='completed', transcript=?, duration_s=?, completed_at=?"
+                  " WHERE id=?", (_dumps(transcript), transcript.get("duration_s"), ts, iid))
+
+
+def add_evaluation(candidate_id: str, job_id: str, evaluation: dict[str, Any]) -> str:
+    """Insert an `evaluations` row and set candidates.score."""
+    eid = _new_id()
+    with get_conn() as c:
+        c.execute("INSERT INTO evaluations (id, candidate_id, job_id, score, criteria, recommendation,"
+                  " summary, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                  (eid, candidate_id, job_id, evaluation["score"], _dumps(evaluation.get("criteria") or []),
+                   evaluation["recommendation"], evaluation.get("summary"), now_iso()))
+        c.execute("UPDATE candidates SET score=?, updated_at=? WHERE id=?",
+                  (evaluation["score"], now_iso(), candidate_id))
+    return eid
+
+
+def latest_evaluation(candidate_id: str) -> Optional[dict[str, Any]]:
+    with get_conn() as c:
+        r = c.execute("SELECT * FROM evaluations WHERE candidate_id=? ORDER BY created_at DESC, rowid DESC"
+                      " LIMIT 1", (candidate_id,)).fetchone()
+    if r is None:
+        return None
+    d = dict(r)
+    d["criteria"] = json.loads(d["criteria"])
+    return d

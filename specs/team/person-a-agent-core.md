@@ -48,12 +48,12 @@
 - [ ] **Sync 1:40**
 
 ## 1:40-2:50 Remaining lifecycle (C is building the UI meanwhile)
-- [ ] `Tick` every 15s per ACTIVE job: one follow-up after N hours, then `mark_stale` after M hours (shorten these in demo config), and job completion check
-- [ ] `schedule_interview` → persist `interviews` row → `INTERVIEWING`
-- [ ] `InterviewDone` → `process_interview` → `INTERVIEWED` → `evaluate_candidate` → `evaluations` row, `candidates.score`, `Evaluated`
-- [ ] `shortlist` if score ≥ threshold, else `reject_candidate_proposal`, `borderline` → `NEEDS_HUMAN`
-- [ ] Re-plan on rejection: redraft with feedback (max 3), interview rejected twice → escalate, rejection overridden → back to `EVALUATED`
-- [ ] `HumanResolved` → resume from `prev_state`; `STALE` reactivate → `CONTACTED`
+- [x] `Tick` every 15s per ACTIVE job: one follow-up after N hours, then `mark_stale` after M hours (shorten these in demo config), and job completion check
+- [x] `schedule_interview` → persist `interviews` row → `INTERVIEWING`
+- [x] `InterviewDone` → `process_interview` → `INTERVIEWED` → `evaluate_candidate` → `evaluations` row, `candidates.score`, `Evaluated`
+- [x] `shortlist` if score ≥ threshold, else `reject_candidate_proposal`, `borderline` → `NEEDS_HUMAN`
+- [x] Re-plan on rejection: redraft with feedback (max 3), interview rejected twice → escalate, rejection overridden → back to `EVALUATED`
+- [x] `HumanResolved` → resume from `prev_state`; `STALE` reactivate → `CONTACTED`
 - [ ] **Sync 2:50:** the voice interview path works end to end with B
 
 ## 2:50-3:40 Reliability + Langfuse → checkpoint: `NEEDS_HUMAN` with trace link

@@ -409,8 +409,10 @@ async def test_full_silence_path_followup_then_stale(db, timing):
     cid = make_candidate(job)
     tools = tools_with()
     set_log(cid, out(1.5))
-    await graph.run_event(event(job, E.Tick, cid, due="followup"), tools=tools,
+    first = event(job, E.Tick, cid, due="followup")
+    await graph.run_event(first, tools=tools,
                           llm=scripted(A.send_followup, subject="Re: Hi", body="nudge"))
+    repo.mark_event_done(first.id)  # the dispatcher would have finished it
     assert len(tools.email.sent) == 1 and state_of(cid) == S.CONTACTED
     log = repo.get_memory(cid).contact_log
     assert [e["kind"] for e in log].count("email_out") == 2

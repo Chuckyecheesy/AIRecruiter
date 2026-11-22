@@ -26,7 +26,7 @@ from api.agent.permissions import (
 from api.agent.state_machine import apply_transition, job_valid_actions, valid_actions
 from api.contracts import (
     ActionName as A, CandidateMemory, CandidateState as S, Decision, Event, EventType as E,
-    PermissionClass,
+    JobState, PermissionClass,
 )
 from api.db import repo
 from api.tools.base import ToolError
@@ -65,6 +65,7 @@ class AgentState(TypedDict, total=False):
     run_id: str
     route: str          # observe/decide/permission_check/execute decide the next hop
     escalate_reason: str
+    escalate_extra: dict
 
 
 def thread_id_for(job_id: str, candidate_id: Optional[str] = None) -> str:
@@ -163,8 +164,11 @@ async def _schedule_interview(tools, st) -> dict:
         st["candidate_id"], list(d.args.get("questions") or []),
         d.args.get("context") or mem.summary,
         job_id=st["job_id"], candidate_name=(st["candidate"] or {}).get("name"))
+    expires = getattr(session, "expires_at", None)
     return {"session": {"conversation_id": getattr(session, "conversation_id", None),
-                        "join_url": getattr(session, "join_url", None)}}
+                        "join_url": getattr(session, "join_url", None),
+                        "expires_at": expires.isoformat() if hasattr(expires, "isoformat") else expires},
+            "questions": list(d.args.get("questions") or [])}
 
 
 async def _process_reply(tools, st) -> dict:
@@ -176,6 +180,31 @@ async def _process_reply(tools, st) -> dict:
                                           _thread(st["memory"], extra_in=text))
         out["draft"] = draft.model_dump(mode="json")
     return out
+
+
+async def _process_interview(tools, st) -> dict:
+    payload = st["event"].payload
+    tr = payload.get("transcript")
+    if tr is None:  # poller path: fetch it from ElevenLabs
+        conv = payload.get("conversation_id")
+        if not conv:
+            raise ToolError("not_found", "InterviewDone carries neither a transcript nor a conversation id")
+        tr = await tools.elevenlabs.get_transcript(conv)
+        if tr is None:
+            raise ToolError("not_found", f"no transcript available yet for conversation {conv}")
+    if hasattr(tr, "model_dump"):
+        tr = tr.model_dump(mode="json")
+    return {"transcript": tr}
+
+
+async def _evaluate(tools, st) -> dict:
+    job = st["job"]
+    ev = await tools.evaluator.evaluate(SimpleNamespace(**job), st["memory"], job["score_threshold"])
+    return {"evaluation": ev.model_dump(mode="json")}
+
+
+async def _resume(tools, st) -> dict:
+    return {"prev_state": (st["candidate"] or {}).get("prev_state")}
 
 
 EXECUTORS = {
@@ -191,6 +220,12 @@ EXECUTORS = {
     A.schedule_interview: ("elevenlabs", _schedule_interview),
     A.reject_candidate_proposal: ("none", _wait),
     A.process_reply: ("classifier", _process_reply),
+    A.process_interview: ("elevenlabs", _process_interview),
+    A.evaluate_candidate: ("evaluator", _evaluate),
+    A.mark_stale: ("none", _wait),
+    A.shortlist: ("none", _wait),
+    A.reactivate: ("none", _wait),
+    A.resume: ("none", _resume),
 }
 
 NEXT_EVENT = {
@@ -199,6 +234,7 @@ NEXT_EVENT = {
     A.find_contact: E.ContactFound,
     A.draft_outreach: E.OutreachDrafted,
     A.redraft_outreach: E.OutreachDrafted,
+    A.process_interview: E.InterviewDone,  # next hop: INTERVIEWED -> evaluate_candidate
 }
 
 
@@ -215,6 +251,11 @@ def _memory_patch(action: A, result: dict, mem: CandidateMemory) -> dict:
         return {"contact_log": mem.contact_log + [{
             "kind": "email_out", "ts": repo.now_iso(), "to": result["to"],
             "subject": result["subject"], "body": result["body"]}]}
+    if action == A.process_interview:
+        return {"contact_log": mem.contact_log + [{
+            "kind": "interview", "ts": repo.now_iso(), "turns": result["transcript"].get("turns") or []}]}
+    if action == A.reactivate:
+        return {"contact_log": mem.contact_log + [{"kind": "reactivated", "ts": repo.now_iso()}]}
     if action == A.process_reply:
         log = mem.contact_log + [{"kind": "email_in", "ts": repo.now_iso(), "body": result["body"]}]
         if result.get("draft"):
@@ -226,6 +267,82 @@ def _memory_patch(action: A, result: dict, mem: CandidateMemory) -> dict:
 def _iso_in(seconds: float) -> str:
     d = datetime.now(timezone.utc) + timedelta(seconds=seconds)
     return d.strftime("%Y-%m-%dT%H:%M:%S.") + f"{d.microsecond // 1000:03d}Z"
+
+
+# ---------- lifecycle rules (code decides what is allowed) ----------
+
+REDRAFT_LIMIT = 3          # rejected drafts we redraft before handing over to a human
+INTERVIEW_REJECT_LIMIT = 2  # CEO rejected the interview request this many times -> escalate
+_DONE_STATES = {S.SHORTLISTED.value, S.REJECTED.value, S.DECLINED.value, S.STALE.value}
+
+
+def _ts(entry: dict) -> Optional[datetime]:
+    try:
+        return repo._parse_ts(entry["ts"])
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def _tick_due(mem: CandidateMemory, now: datetime) -> Optional[str]:
+    """'followup' | 'stale' | None for a CONTACTED candidate, from its contact log."""
+    outs = [t for e in mem.contact_log if e.get("kind") == "email_out" and (t := _ts(e))]
+    if not outs:
+        return None
+    ins = [t for e in mem.contact_log if e.get("kind") == "email_in" and (t := _ts(e))]
+    if ins and max(ins) > max(outs):
+        return None  # they replied
+    clock = max(outs + [t for e in mem.contact_log if e.get("kind") == "reactivated" and (t := _ts(e))])
+    age_h = (now - clock).total_seconds() / 3600
+    if len(outs) == 1:
+        return "followup" if age_h >= settings.followup_after_hours else None
+    return "stale" if age_h >= settings.stale_after_hours else None
+
+
+def _job_tick(job: dict) -> None:
+    """Job-level Tick: completion check, then flag CONTACTED candidates due a nudge / stale."""
+    if job["state"] != JobState.ACTIVE.value:
+        return
+    cands = repo.list_candidates(job["id"])
+    shortlisted = sum(c["state"] == S.SHORTLISTED.value for c in cands)
+    if shortlisted >= job["shortlist_target"] or (cands and all(c["state"] in _DONE_STATES for c in cands)):
+        repo.set_job_state(job["id"], JobState.COMPLETE)
+        return
+    now = datetime.now(timezone.utc)
+    for c in cands:
+        if c["state"] != S.CONTACTED.value:
+            continue
+        due = _tick_due(repo.get_memory(c["id"]), now)
+        if due and not repo.has_pending_event(job["id"], E.Tick, c["id"], due=due):
+            repo.emit_event(job["id"], E.Tick, c["id"], {"due": due})
+
+
+def _contextual_actions(cand: dict, job: dict, ev: Event, valid: list[A]) -> tuple[list[A], Optional[dict]]:
+    """Narrow the state table by context. Returns (actions, escalation) where escalation is
+    {"reason", "extra"} when the run must hand over to a human instead of deciding."""
+    state, cid = S(cand["state"]), cand["id"]
+    if ev.type == E.Tick and state == S.CONTACTED:
+        drop = {"followup": A.mark_stale, "stale": A.send_followup}.get(ev.payload.get("due"))
+        valid = [a for a in valid if a != drop]
+    if ev.type == E.ApprovalRejected:
+        action = ev.payload.get("action")
+        if action == A.send_outreach.value and repo.count_approvals(
+                cid, A.send_outreach, "rejected") > REDRAFT_LIMIT:
+            return valid, {"reason": f"outreach draft rejected {REDRAFT_LIMIT + 1} times", "extra": {}}
+        if action == A.schedule_interview.value and repo.count_approvals(
+                cid, A.schedule_interview, "rejected") >= INTERVIEW_REJECT_LIMIT:
+            return valid, {"reason": "interview request rejected twice", "extra": {}}
+    if state == S.EVALUATED and cand.get("score") is not None:
+        evaluation = repo.latest_evaluation(cid)
+        borderline = bool(evaluation) and evaluation["recommendation"] == "borderline"
+        if borderline and ev.type == E.Evaluated:
+            return valid, {"reason": "borderline evaluation needs a human decision", "extra": {
+                "evaluation": {k: evaluation[k] for k in ("score", "recommendation", "summary")}}}
+        if repo.count_approvals(cid, A.reject_candidate_proposal, "rejected"):  # CEO override
+            valid = [a for a in valid if a != A.reject_candidate_proposal]
+        elif not borderline:
+            drop = A.reject_candidate_proposal if cand["score"] >= job["score_threshold"] else A.shortlist
+            valid = [a for a in valid if a != drop]
+    return valid, None
 
 
 # ---------- graph ----------
@@ -246,6 +363,9 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
             return {**out, "route": "end"}
         cid = st.get("candidate_id")
         if cid is None:
+            if ev.type == E.Tick:
+                _job_tick(job)
+                return {**out, "route": "end"}
             out["valid_actions"] = job_valid_actions(job) if ev.type == E.JobCreated else []
             out["route"] = "decide" if out["valid_actions"] else "end"
             return out
@@ -256,7 +376,10 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         if state == S.NEEDS_HUMAN and ev.type != E.HumanResolved:
             out["route"] = "end"
             return out
-        out["valid_actions"] = valid_actions(state, job)
+        out["valid_actions"], handover = _contextual_actions(cand, job, ev, valid_actions(state, job))
+        if handover:
+            return {**out, "route": "escalate", "escalate_reason": handover["reason"],
+                    "escalate_extra": handover["extra"]}
         if ev.type == E.ApprovalGranted:
             # Execute exactly what the CEO approved; the LLM is not consulted.
             ap = repo.get_approval(ev.payload.get("approval_id") or "")
@@ -395,9 +518,26 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         repo.set_candidate_state(cid, new_state)
         repo.update_memory(cid, **patch, decisions=decisions, summary=summary)
         _record_messages(st, d.action, result, cid, job)
+        _record_lifecycle(d.action, result, cid, job)
         if d.action in NEXT_EVENT:
             repo.emit_event(st["job_id"], NEXT_EVENT[d.action], cid, {"from": cand["state"]})
         return {}
+
+    def _record_lifecycle(action: A, result: dict, cid: str, job: dict) -> None:
+        if action == A.schedule_interview:
+            sess = result["session"]
+            repo.create_interview(cid, job["id"], conversation_id=sess.get("conversation_id"),
+                                  join_url=sess.get("join_url"), questions=result.get("questions") or [],
+                                  expires_at=sess.get("expires_at"))
+            repo.emit_event(job["id"], E.InterviewScheduled, cid, {
+                "join_url": sess.get("join_url"), "conversation_id": sess.get("conversation_id")})
+        elif action == A.process_interview:
+            repo.complete_interview(cid, job["id"], result["transcript"])
+        elif action == A.evaluate_candidate:
+            ev = result["evaluation"]
+            repo.add_evaluation(cid, job["id"], ev)
+            repo.emit_event(job["id"], E.Evaluated, cid, {
+                "score": ev["score"], "recommendation": ev["recommendation"]})
 
     def _record_messages(st: AgentState, action: A, result: dict, cid: str, job: dict) -> None:
         if action in (A.send_outreach, A.send_followup):
@@ -414,7 +554,7 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
     async def escalate(st: AgentState) -> dict:
         reason = st.get("escalate_reason") or "escalated"
         if st.get("candidate_id"):
-            repo.escalate_candidate(st["candidate_id"], reason)
+            repo.escalate_candidate(st["candidate_id"], reason, extra=st.get("escalate_extra"))
         else:
             repo.emit_event(st["job_id"], E.Escalated, None, {"reason": reason})
         return {}
@@ -425,7 +565,7 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         g.add_node(name, fn)
     g.add_edge(START, "observe")
     for src, targets in {
-        "observe": {"decide", "execute"}, "decide": {"permission_check", "escalate"},
+        "observe": {"decide", "execute", "escalate"}, "decide": {"permission_check", "escalate"},
         "permission_check": {"execute"}, "execute": {"update_state", "escalate"},
     }.items():
         g.add_conditional_edges(
@@ -496,7 +636,7 @@ async def run_event(
                 {"job_id": event.job_id, "candidate_id": cid, "event": event,
                  "decide_attempts": 0, "run_id": run_id, "route": "decide",
                  "decision": None, "result": None, "error": None, "approval": None,
-                 "escalate_reason": "", "valid_actions": []},
+                 "escalate_reason": "", "escalate_extra": {}, "valid_actions": []},
                 config={"configurable": {"thread_id": tid}})
             # Finished cleanly: drop this thread's history. Checkpoints of a crashed run stay.
             await saver.adelete_thread(tid)
