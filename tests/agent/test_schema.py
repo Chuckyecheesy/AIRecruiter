@@ -143,3 +143,55 @@ def test_approval_status_defaults_to_pending(db):
     db.execute("INSERT INTO approvals (id, job_id, candidate_id, action, payload) "
                "VALUES ('A1', 'J1', 'C1', 'send_outreach', '{}')")
     assert db.execute("SELECT status FROM approvals").fetchone()[0] == "pending"
+
+
+# --- foreign keys: every child row must reference an existing job/candidate ---
+FK_CASES = {
+    # table: (extra columns, refs it carries)
+    "candidates": ({"id": "X1", "ploid_id": "PX", "name": "n", "name_key": "n", "state": "DISCOVERED"}, ["job_id"]),
+    "candidate_memory": ({}, ["candidate_id"]),
+    "messages": ({"id": "X1", "channel": "email", "direction": "out"}, ["job_id", "candidate_id"]),
+    "interviews": ({"id": "X1", "status": "scheduled"}, ["job_id", "candidate_id"]),
+    "evaluations": ({"id": "X1", "score": 80, "recommendation": "shortlist"}, ["job_id", "candidate_id"]),
+    "approvals": ({"id": "X1", "action": "send_outreach", "payload": "{}"}, ["job_id", "candidate_id"]),
+    "events": ({"type": "Tick"}, ["job_id", "candidate_id"]),
+    "tool_calls": ({"id": "X1", "tool": "t", "action": "a", "idempotency_key": "K", "status": "ok"}, ["candidate_id"]),
+    "agent_runs": ({"id": "X1", "status": "running"}, ["job_id", "candidate_id"]),
+}
+
+
+def insert_child(db, table, bad_ref=None):
+    extra, refs = FK_CASES[table]
+    vals = dict(extra)
+    for ref in refs:
+        vals[ref] = "J1" if ref == "job_id" else "C1"
+    if bad_ref:
+        vals[bad_ref] = "MISSING"
+    names = ", ".join(vals)
+    marks = ", ".join("?" for _ in vals)
+    db.execute(f"INSERT INTO {table} ({names}) VALUES ({marks})", list(vals.values()))
+
+
+@pytest.mark.parametrize("table", sorted(FK_CASES))
+def test_child_row_with_valid_refs_inserts(db, table):
+    seed_job(db)
+    seed_candidate(db)
+    if table == "candidates":
+        FK_CASES[table][0]["ploid_id"] = "PX"  # distinct from the seeded candidate
+    insert_child(db, table)
+
+
+@pytest.mark.parametrize(
+    "table, ref",
+    [(t, r) for t, (_, refs) in sorted(FK_CASES.items()) for r in refs],
+)
+def test_child_row_with_missing_ref_is_rejected(db, table, ref):
+    seed_job(db)
+    seed_candidate(db)
+    with pytest.raises(sqlite3.IntegrityError):
+        insert_child(db, table, bad_ref=ref)
+
+
+def test_job_level_event_may_have_null_candidate(db):
+    seed_job(db)
+    db.execute("INSERT INTO events (job_id, candidate_id, type) VALUES ('J1', NULL, 'JobCreated')")
