@@ -28,6 +28,7 @@ from api.contracts import (
     Approval,
     CandidateMemory,
     CandidateState,
+    Event,
     EventType,
     JobState,
 )
@@ -487,3 +488,70 @@ def release_stale_locks(stale_after_s: int = 120) -> int:
                 c.execute("UPDATE candidates SET locked_by=NULL, locked_at=NULL WHERE id=?", (r["id"],))
                 cleared += 1
     return cleared
+
+
+# ---------- event queue (dispatcher) ----------
+
+def _event(r: sqlite3.Row) -> Event:
+    d = dict(r)
+    d["payload"] = json.loads(d["payload"])
+    return Event(**d)
+
+
+def fetch_due_events(limit: int = 10, job_id: Optional[str] = None) -> list[Event]:
+    """Pending events that are due, oldest first, for ACTIVE jobs only.
+
+    Events of PAUSED/DRAFT/COMPLETE jobs stay pending until the job is ACTIVE again.
+    """
+    sql = ("SELECT e.* FROM events e JOIN jobs j ON j.id = e.job_id "
+           "WHERE e.status='pending' AND j.state=? AND (e.not_before IS NULL OR e.not_before <= ?)")
+    args: list[Any] = [JobState.ACTIVE.value, now_iso()]
+    if job_id is not None:
+        sql += " AND e.job_id=?"
+        args.append(job_id)
+    sql += " ORDER BY e.id LIMIT ?"
+    args.append(limit)
+    with get_conn() as c:
+        return [_event(r) for r in c.execute(sql, args).fetchall()]
+
+
+def claim_event(event_id: int) -> bool:
+    """Atomic pending -> processing. `processed_at` holds the claim time meanwhile."""
+    with get_conn() as c:
+        cur = c.execute("UPDATE events SET status='processing', processed_at=? "
+                        "WHERE id=? AND status='pending'", (now_iso(), event_id))
+        return cur.rowcount == 1
+
+
+def mark_event_done(event_id: int) -> None:
+    with get_conn() as c:
+        c.execute("UPDATE events SET status='done', processed_at=? WHERE id=?", (now_iso(), event_id))
+
+
+def mark_event_failed(event_id: int, max_attempts: int = 3) -> bool:
+    """attempts += 1. Retry (back to pending) below max_attempts; else 'failed'.
+
+    Returns True when attempts are exhausted and the caller should escalate.
+    """
+    with get_conn() as c:
+        r = c.execute("SELECT attempts FROM events WHERE id=?", (event_id,)).fetchone()
+        if r is None:
+            raise LookupError(f"event {event_id} not found")
+        attempts = r["attempts"] + 1
+        exhausted = attempts >= max_attempts
+        c.execute("UPDATE events SET status=?, attempts=?, processed_at=? WHERE id=?",
+                  ("failed" if exhausted else "pending", attempts,
+                   now_iso() if exhausted else None, event_id))
+        return exhausted
+
+
+def reset_stuck_events(stale_after_s: int = 120) -> int:
+    """Crash recovery: 'processing' rows claimed longer ago than the threshold -> 'pending'."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_after_s)
+    n = 0
+    with get_conn() as c:
+        for r in c.execute("SELECT id, processed_at FROM events WHERE status='processing'").fetchall():
+            if r["processed_at"] is None or _parse_ts(r["processed_at"]) <= cutoff:
+                c.execute("UPDATE events SET status='pending', processed_at=NULL WHERE id=?", (r["id"],))
+                n += 1
+    return n
