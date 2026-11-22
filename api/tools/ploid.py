@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 
 from api.tools.base import ToolError
+from api.tools.http import json_body, path_id, raise_for_status
 from api.tools.models import EnrichedProfile, PloidCandidate, SearchCriteria
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "ploid_candidates.json"
@@ -49,20 +50,25 @@ class RealPloidClient:
             base_url=base_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=20
         )
 
-    async def _req(self, method: str, url: str, **kw) -> dict:
+    async def _req(self, method: str, url: str, **kw):
         try:
             r = await self._http.request(method, url, **kw)
         except httpx.TransportError as e:
             raise ToolError("transient", f"ploid network error: {e}") from e
-        _raise_for_status(r, "ploid")
-        return r.json()
+        raise_for_status(r, "ploid")
+        return json_body(r, "ploid")
 
     async def search(self, criteria: SearchCriteria, limit: int) -> list[PloidCandidate]:
         data = await self._req("POST", "/search", json={**criteria.model_dump(), "limit": limit})
-        return [PloidCandidate.model_validate(c) for c in data.get("results", data)]
+        rows = data.get("results", []) if isinstance(data, dict) else data
+        if not isinstance(rows, list):
+            raise ToolError("transient", "ploid: unexpected search response shape")
+        return [PloidCandidate.model_validate(c) for c in rows]
 
     async def enrich(self, ploid_id: str) -> EnrichedProfile:
-        data = await self._req("GET", f"/profiles/{ploid_id}")
+        data = await self._req("GET", f"/profiles/{path_id(ploid_id)}")
+        if not isinstance(data, dict):
+            raise ToolError("transient", "ploid: unexpected profile response shape")
         data.setdefault("ploid_id", ploid_id)
         data.setdefault("raw", dict(data))
         data.setdefault("completeness", _completeness(data))
@@ -74,16 +80,5 @@ def _completeness(d: dict) -> float:
     return sum(1 for f in fields if d.get(f)) / len(fields)
 
 
-def _raise_for_status(r: httpx.Response, tool: str) -> None:
-    if r.status_code < 400:
-        return
-    if r.status_code == 404:
-        raise ToolError("not_found", f"{tool}: 404")
-    if r.status_code == 429:
-        ra = r.headers.get("retry-after")
-        raise ToolError("rate_limited", f"{tool}: 429", retry_after_s=float(ra) if ra else 5.0)
-    if r.status_code in (400, 422):
-        raise ToolError("invalid_input", f"{tool}: {r.status_code} {r.text[:200]}")
-    if r.status_code in (401, 403):
-        raise ToolError("fatal", f"{tool}: auth failed ({r.status_code})")
-    raise ToolError("transient", f"{tool}: {r.status_code}")
+# Back-compat alias (tests and other adapters import it from here).
+_raise_for_status = raise_for_status
