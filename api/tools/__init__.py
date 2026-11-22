@@ -100,7 +100,11 @@ def build_tools(s: Settings) -> Tools:
         status["elevenlabs"] = fallback("elevenlabs", [k for k in ("ELEVENLABS_API_KEY", "ELEVENLABS_AGENT_ID")
                                                        if not getattr(s, k.lower())])
 
-    email: Any = EmailSimulator(s.allow_real_email, s.email_allowlist_set); status["email"] = "simulated"
+    email: Any = EmailSimulator(s.allow_real_email, s.email_allowlist_set, smtp={
+        "host": s.smtp_host, "port": s.smtp_port, "user": s.smtp_user, "password": s.smtp_password,
+        "from": s.smtp_from})
+    status["email"] = (f"REAL to allowlist ({', '.join(sorted(s.email_allowlist_set))})"
+                       if s.allow_real_email and s.smtp_host and s.email_allowlist_set else "simulated")
 
     tools = Tools(
         ploid=ploid, fiber=fiber, browser=browser, email=email,

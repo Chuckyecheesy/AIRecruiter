@@ -64,11 +64,13 @@ async def test_email_is_simulated(tools):
     assert r.simulated and r.message_id.startswith("sim_")
 
 
-async def test_email_guard_blocks_real_send():
+async def test_email_guard_needs_flag_allowlist_and_smtp():
+    # flags set but no SMTP configured -> still simulated, never a real send
     t = build_tools(mock_settings(allow_real_email=True, email_allowlist="me@x.io"))
-    with pytest.raises(ToolError) as e:
-        await t.email.send("me@x.io", "s", "b", "t")
-    assert e.value.kind == "fatal"
+    assert (await t.email.send("me@x.io", "s", "b", "t")).simulated
+    t = build_tools(mock_settings(allow_real_email=True, email_allowlist="me@x.io", smtp_host="h",
+                                  smtp_user="u", smtp_password="p"))
+    assert t.email.real_send_allowed("me+sarah@x.io") and not t.email.real_send_allowed("other@x.io")
 
 
 async def test_persona_and_disposition(tools):

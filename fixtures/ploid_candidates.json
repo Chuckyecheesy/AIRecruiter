@@ -1,5 +1,96 @@
 [
   {
+    "ploid_id": "pl_009",
+    "name": "Justin Tran",
+    "headline": "AI engineer: agents, RAG and voice AI; full-stack TypeScript + Python",
+    "location": "Toronto, ON",
+    "profile_urls": [
+      "https://github.com/justintran-ai"
+    ],
+    "profile": {
+      "ploid_id": "pl_009",
+      "name": "Justin Tran",
+      "headline": "AI engineer: agents, RAG and voice AI; full-stack TypeScript + Python",
+      "location": "Toronto, ON",
+      "skills": [
+        "Python",
+        "TypeScript",
+        "React",
+        "Next.js",
+        "FastAPI",
+        "LangGraph",
+        "RAG",
+        "LLM evaluation",
+        "Agents",
+        "ElevenLabs",
+        "Claude",
+        "Gemini",
+        "PostgreSQL",
+        "pgvector",
+        "Docker",
+        "AWS"
+      ],
+      "projects": [
+        {
+          "name": "AI Recruiter Agent",
+          "description": "Persistent LangGraph recruiter agent: sources, contacts, voice-interviews and evaluates candidates behind a permission layer; deployed on Maritime",
+          "tech": [
+            "LangGraph",
+            "FastAPI",
+            "Next.js",
+            "ElevenLabs",
+            "Gemini"
+          ],
+          "url": "https://github.com/justintran-ai/ai-recruiter"
+        },
+        {
+          "name": "Docs Copilot",
+          "description": "RAG assistant over 40k internal docs with hybrid search, reranking and an eval harness (recall@5 0.62 -> 0.89)",
+          "tech": [
+            "Python",
+            "pgvector",
+            "TypeScript"
+          ]
+        },
+        {
+          "name": "Voice Support Agent",
+          "description": "Real-time voice agent handling 1k calls/week with tool calling and human handoff",
+          "tech": [
+            "ElevenLabs",
+            "TypeScript",
+            "Twilio"
+          ]
+        }
+      ],
+      "education": [
+        "BSc Computer Science, University of Toronto"
+      ],
+      "experience": [
+        {
+          "company": "Shopify",
+          "title": "Software Engineer, AI",
+          "start": "2023-05",
+          "end": null,
+          "summary": "Built LLM features for merchant support; owns retrieval + evaluation pipeline"
+        },
+        {
+          "company": "Wealthsimple",
+          "title": "Software Engineering Intern",
+          "start": "2022-05",
+          "end": "2022-08",
+          "summary": "Full-stack TypeScript and Python services"
+        }
+      ],
+      "links": {
+        "github": "https://github.com/justintran-ai"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.95
+    }
+  },
+  {
     "ploid_id": "pl_001",
     "name": "Sarah Chen",
     "headline": "AI Engineer building RAG apps in TypeScript",

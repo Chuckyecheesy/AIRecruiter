@@ -326,7 +326,7 @@ async def test_mock_ploid_limit_respected():
     m = MockPloidClient()
     assert len(await m.search(SearchCriteria(title="x"), limit=0)) == 0
     assert len(await m.search(SearchCriteria(title="x"), limit=3)) == 3
-    assert len(await m.search(SearchCriteria(title="x"), limit=100)) == 8
+    assert len(await m.search(SearchCriteria(title="x"), limit=100)) == 9
 
 
 # ======================= Settings + build_tools =======================
@@ -478,10 +478,9 @@ async def test_email_allowlisted_without_allow_flag_stays_simulated():
 
 
 async def test_email_guard_case_insensitive_via_build_tools():
-    t = build_tools(S(allow_real_email=True, email_allowlist="Me@X.io"))
-    with pytest.raises(ToolError) as e:
-        await t.email.send("ME@x.IO", "s", "b", "t")
-    assert e.value.kind == "fatal"
+    t = build_tools(S(allow_real_email=True, email_allowlist="Me@X.io", smtp_host="h", smtp_user="u",
+                      smtp_password="p"))
+    assert t.email.real_send_allowed("ME+Tag@x.IO")
 
 
 async def test_email_message_ids_unique():
@@ -963,10 +962,10 @@ def _norm(name: str) -> str:
     return "".join(c for c in name.lower() if c.isalnum())
 
 
-def test_fixture_has_8_unique_candidates():
+def test_fixture_has_9_unique_candidates():
     rows = _rows()
-    assert len(rows) == 8
-    assert len({r["ploid_id"] for r in rows}) == 8
+    assert len(rows) == 9
+    assert len({r["ploid_id"] for r in rows}) == 9
 
 
 def test_fixture_rows_validate():

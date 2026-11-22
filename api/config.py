@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     demo_inbox: str = "demo@example.com"
     allow_real_email: bool = False
     email_allowlist: str = ""  # comma-separated
+    smtp_host: str | None = None       # e.g. smtp.gmail.com
+    smtp_port: int = 587
+    smtp_user: str | None = None       # e.g. you@gmail.com
+    smtp_password: str | None = None   # Gmail: an App Password, not your login password
+    smtp_from: str | None = None
 
     # Runtime
     persona_delay_s: float = 15.0

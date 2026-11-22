@@ -8,6 +8,7 @@ Only code applies transitions; the LLM only picks from `valid_actions`.
 from __future__ import annotations
 
 import asyncio
+import logging
 import inspect
 import json
 import os
@@ -37,6 +38,7 @@ from api.config import settings
 from api.tools.models import Draft, Message, SearchCriteria
 from api.tools.persona import pick_disposition
 
+log = logging.getLogger(__name__)
 DEFAULT_CHECKPOINT_DB = "data/checkpoints.db"
 MAX_RETRIES = 3
 TRANSIENT_BACKOFF_S = (1, 2, 4)
@@ -233,10 +235,32 @@ async def _schedule_interview(tools, st) -> dict:
         d.args.get("context") or _role_blurb(st["job"] or {}),
         job_id=st["job_id"], candidate_name=(st["candidate"] or {}).get("name"))
     expires = getattr(session, "expires_at", None)
+    invite = await _email_interview_link(tools, st, getattr(session, "join_url", None))
     return {"session": {"conversation_id": getattr(session, "conversation_id", None),
                         "join_url": getattr(session, "join_url", None),
                         "expires_at": expires.isoformat() if hasattr(expires, "isoformat") else expires},
-            "questions": list(d.args.get("questions") or [])}
+            "questions": list(d.args.get("questions") or []), "invite": invite}
+
+
+async def _email_interview_link(tools, st, join_url: Optional[str]) -> Optional[dict]:
+    """Email the candidate the voice-interview link (real only for allowlisted demo inboxes; see
+    api/tools/email_sim.py). Never blocks scheduling: the link is also shown in the dashboard."""
+    mem, cand, job = st["memory"], st["candidate"] or {}, st["job"] or {}
+    to = (mem.contact or {}).get("email") if mem is not None else None
+    if not (to and join_url):
+        return None
+    first = (cand.get("name") or "there").split()[0]
+    body = (f"Hi {first},\n\nThanks for your interest in the {job.get('title') or 'open'} role! "
+            f"Here's the link to a short (~5 min) voice screen with our recruiter agent. Open it in "
+            f"Chrome and allow microphone access:\n\n{join_url}\n\nThe link works for the next 2 hours.\n\n"
+            f"Best,\nthe CEO")
+    try:
+        r = await tools.email.send(to, f"Your voice interview: {job.get('title') or 'next step'}", body,
+                                   _thread_id(st))
+        return {"to": to, "message_id": getattr(r, "message_id", None), "simulated": getattr(r, "simulated", True)}
+    except Exception as e:  # noqa: BLE001 - the invite is best-effort
+        log.warning("interview invite email failed for %s: %r", st["candidate_id"], e)
+        return {"to": to, "error": str(e)}
 
 
 async def _process_reply(tools, st) -> dict:
