@@ -1,17 +1,28 @@
-"""Shared enums + Pydantic models (frozen after kickoff; changes go through lane A).
+"""Shared contract: enums + Pydantic models used by every lane.
 
-Names mirror web/lib/types.ts exactly. Enum values equal member names so they
-store as plain text in SQLite and compare equal to strings.
+SHARED FILE. Written at kickoff, then frozen. Lane A merges any later changes,
+and lane C mirrors them in web/lib/types.ts.
+
+Sections:
+  1. Enums (specs 01, 03, 04)                       — lane A
+  2. Core records (Decision, Approval, Event, ...)  — lane A
+  3. Tool I/O models (spec 02)                      — lane B (TODO at kickoff)
+  4. API request/response shapes (spec 06)          — lane C
 """
+
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any, Literal, Optional
+from enum import StrEnum
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
-class CandidateState(str, Enum):
+# ───────────────────────────── 1. Enums ─────────────────────────────
+
+
+class CandidateState(StrEnum):
     DISCOVERED = "DISCOVERED"
     RESEARCHED = "RESEARCHED"
     CONTACT_FOUND = "CONTACT_FOUND"
@@ -163,17 +174,26 @@ class Decision(CoreModel):
     reasoning: str = ""
 
 
+# Documentation of the common keys only. CandidateMemory stores these lists as plain dicts because
+# lane A writes several entry kinds with different keys (e.g. contact_log entries of kind
+# email_out / email_in / draft / interview / reactivated, with to/subject/body/turns) and reads
+# them with dict access. Extra keys are allowed if you do validate an entry with these models.
 class DecisionLogEntry(CoreModel):
-    ts: str
-    action: str
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
+
+    ts: str | None = None
+    action: str | None = None
     reasoning: str = ""
     outcome: str | None = None
 
 
 class ContactLogEntry(CoreModel):
-    ts: str
-    channel: str
-    action: str
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
+
+    ts: str | None = None
+    kind: str | None = None  # lane A: email_out | email_in | draft | interview | reactivated
+    channel: str | None = None
+    action: str | None = None
     message_id: str | None = None
 
 
@@ -182,8 +202,8 @@ class CandidateMemory(CoreModel):
     profile: dict[str, Any] = Field(default_factory=dict)
     research_notes: dict[str, Any] = Field(default_factory=dict)
     contact: dict[str, Any] = Field(default_factory=dict)
-    contact_log: list[ContactLogEntry] = Field(default_factory=list)
-    decisions: list[DecisionLogEntry] = Field(default_factory=list)
+    contact_log: list[dict[str, Any]] = Field(default_factory=list)  # see ContactLogEntry
+    decisions: list[dict[str, Any]] = Field(default_factory=list)    # see DecisionLogEntry
     summary: str = ""
     updated_at: str | None = None
 
@@ -194,21 +214,25 @@ class ApprovalRecord(CoreModel):
     id: str
     job_id: str
     candidate_id: str
-    action: RestrictedAction
+    action: ActionName  # always one of RESTRICTED_ACTIONS in practice (lane A enforces it)
     payload: dict[str, Any] = Field(default_factory=dict)
-    status: ApprovalStatus
+    status: ApprovalStatus = ApprovalStatus.pending
     reasoning: str = ""
     decided_by: Literal["ceo", "auto"] | None = None
     feedback: str | None = None
-    created_at: str
+    created_at: str | None = None  # set by the DB layer on insert
     decided_at: str | None = None
     executed_at: str | None = None
+
+
+# Lane A's original name (api/db/repo.py, api/agent/*). Same model.
+Approval = ApprovalRecord
 
 
 class Event(CoreModel):
     """DB-shaped events row (snake_case)."""
 
-    id: int
+    id: int | None = None  # autoincrement cursor; None before insert
     job_id: str
     candidate_id: str | None = None
     type: EventType
@@ -216,7 +240,7 @@ class Event(CoreModel):
     status: EventStatus = EventStatus.pending
     not_before: str | None = None
     attempts: int = 0
-    created_at: str
+    created_at: str | None = None  # set by the DB layer on insert
     processed_at: str | None = None
 
 
