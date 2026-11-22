@@ -345,8 +345,12 @@ async def run_event(
                 saver.serde = _SERDE
                 app = build_graph(tools, llm, saver)
                 final = await app.ainvoke(
+                    # The thread is reused for every event of a candidate and LangGraph restores the
+                    # last checkpoint, so every per-run field must be reset explicitly.
                     {"job_id": event.job_id, "candidate_id": cid, "event": event,
-                     "decide_attempts": 0, "run_id": run_id, "route": "decide"},
+                     "decide_attempts": 0, "run_id": run_id, "route": "decide",
+                     "decision": None, "result": None, "error": None, "approval": None,
+                     "escalate_reason": "", "valid_actions": []},
                     config={"configurable": {"thread_id": thread_id_for(event.job_id, cid)}})
         if final.get("error") or final.get("route") == "escalate":
             status = "error"

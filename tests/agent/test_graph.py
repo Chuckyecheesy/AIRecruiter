@@ -309,3 +309,19 @@ async def test_lock_released_even_when_escalated(db, job):
 
 async def _instant_sleep(*a, **k):
     return None
+
+
+async def test_state_does_not_leak_between_runs_on_the_same_thread(db, job):
+    """The thread id is per candidate, so LangGraph restores the last checkpoint each run."""
+    cid = repo.create_candidate(job, "p1", "Ada")
+    tools = tools_with(FakePloid(enrich_errors=[ToolError("fatal")]))
+    first = await graph.run_event(_event(job, E.CandidateFound, cid), tools=tools,
+                                  llm=scripted_llm(A.enrich_candidate))
+    assert first["error"]
+    # NEEDS_HUMAN + a non-HumanResolved event => observe skips; nothing may carry over.
+    second = await graph.run_event(_event(job, E.Tick, cid), tools=tools,
+                                   llm=scripted_llm(A.enrich_candidate))
+    assert second["decision"] is None and second["error"] is None
+    with repo.get_conn() as c:
+        st = [r["status"] for r in c.execute("SELECT status FROM agent_runs ORDER BY started_at, id")]
+    assert st == ["error", "ok"]
