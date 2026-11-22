@@ -39,8 +39,8 @@ def _mark_seen(conv_id: str) -> None:
 
 
 async def emit_interview_done(job_id: str, candidate_id: str, payload: dict) -> None:
-    """Hands the transcript to lane A. Expected repo signature (confirm with William):
-        repo.emit_event(type, *, job_id, candidate_id, payload)  (sync or async)
+    """Hands the transcript to lane A: repo.emit_event(job_id, type, candidate_id, payload) (sync).
+    Called with keywords only, so argument order can't silently break.
     Lane A should also ignore InterviewDone if the candidate is no longer INTERVIEWING
     (dedupe here is per-process only).
     """
@@ -48,7 +48,7 @@ async def emit_interview_done(job_id: str, candidate_id: str, payload: dict) -> 
         from api.db import repo  # lane A
     except ImportError as e:
         raise HTTPException(503, "event store not available yet (api.db.repo missing)") from e
-    res = repo.emit_event("InterviewDone", job_id=job_id, candidate_id=candidate_id, payload=payload)
+    res = repo.emit_event(job_id=job_id, type="InterviewDone", candidate_id=candidate_id, payload=payload)
     if inspect.isawaitable(res):
         await res
 
