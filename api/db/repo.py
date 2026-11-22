@@ -555,3 +555,104 @@ def reset_stuck_events(stale_after_s: int = 120) -> int:
                 c.execute("UPDATE events SET status='pending', processed_at=NULL WHERE id=?", (r["id"],))
                 n += 1
     return n
+
+
+# ---------- agent graph support (lane A) ----------
+
+def set_candidate_state(candidate_id: str, state: CandidateState) -> None:
+    """Apply a state change decided by `apply_transition` (code only, never the LLM)."""
+    with get_conn() as c:
+        _candidate_row(c, candidate_id)
+        c.execute("UPDATE candidates SET state=?, updated_at=? WHERE id=?",
+                  (CandidateState(state).value, now_iso(), candidate_id))
+
+
+def escalate_candidate(candidate_id: str, reason: str, trace_url: Optional[str] = None) -> bool:
+    """-> NEEDS_HUMAN, remembering prev_state; emits Escalated. False if already escalated."""
+    with get_conn() as c:
+        r = _candidate_row(c, candidate_id)
+        state = CandidateState(r["state"])
+        if state == CandidateState.NEEDS_HUMAN:
+            return False
+        c.execute("UPDATE candidates SET state=?, prev_state=?, trace_url=?, updated_at=? WHERE id=?",
+                  (CandidateState.NEEDS_HUMAN.value, state.value, trace_url, now_iso(), candidate_id))
+        _emit(c, r["job_id"], EventType.Escalated, candidate_id,
+              {"reason": reason, "prev_state": state.value, "trace_url": trace_url})
+        return True
+
+
+def find_duplicate_candidate(job_id: str, ploid_id: str, name: str,
+                             urls: list[str]) -> Optional[str]:
+    """Duplicate guard: same (job, ploid_id), or same name_key plus a shared profile URL."""
+    name_key = re.sub(r"[\W_]+", "", name.lower())
+    wanted = {u.strip().lower().rstrip("/") for u in urls if u}
+    with get_conn() as c:
+        r = c.execute("SELECT id FROM candidates WHERE job_id=? AND ploid_id=?",
+                      (job_id, ploid_id)).fetchone()
+        if r:
+            return r["id"]
+        for r in c.execute("SELECT id FROM candidates WHERE job_id=? AND name_key=?",
+                           (job_id, name_key)).fetchall():
+            prof = _memory(c, r["id"]).profile
+            have = {str(u).strip().lower().rstrip("/") for u in
+                    list((prof.get("links") or {}).values()) + list(prof.get("profile_urls") or [])}
+            if wanted & have:
+                return r["id"]
+    return None
+
+
+def count_candidates(job_id: str) -> int:
+    with get_conn() as c:
+        return c.execute("SELECT count(*) FROM candidates WHERE job_id=?", (job_id,)).fetchone()[0]
+
+
+def append_decision(candidate_id: str, entry: dict[str, Any]) -> None:
+    with get_conn() as c:
+        decisions = _memory(c, candidate_id).decisions + [entry]
+        _write_memory(c, candidate_id, {"decisions": decisions})
+
+
+def get_tool_call(idempotency_key: str) -> Optional[dict[str, Any]]:
+    with get_conn() as c:
+        r = c.execute("SELECT * FROM tool_calls WHERE idempotency_key=?", (idempotency_key,)).fetchone()
+    if r is None:
+        return None
+    d = dict(r)
+    for k in ("input", "output"):
+        d[k] = json.loads(d[k]) if d[k] else None
+    return d
+
+
+def record_tool_call(
+    *, run_id: Optional[str], candidate_id: Optional[str], tool: str, action: ActionName,
+    idempotency_key: str, input: Any, output: Any, status: str,
+    error_kind: Optional[str] = None, attempts: int = 1, latency_ms: Optional[int] = None,
+) -> None:
+    """Upsert by idempotency_key (a retried event overwrites its earlier error row)."""
+    with get_conn() as c:
+        c.execute(
+            "INSERT INTO tool_calls (id, run_id, candidate_id, tool, action, idempotency_key, input,"
+            " output, status, error_kind, attempts, latency_ms, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(idempotency_key) DO UPDATE SET run_id=excluded.run_id, output=excluded.output,"
+            " status=excluded.status, error_kind=excluded.error_kind, attempts=excluded.attempts,"
+            " latency_ms=excluded.latency_ms",
+            (_new_id(), run_id, candidate_id, tool, ActionName(action).value, idempotency_key,
+             json.dumps(input, default=str), json.dumps(output, default=str), status, error_kind,
+             attempts, latency_ms, now_iso()))
+
+
+def start_run(job_id: str, candidate_id: Optional[str], event_id: Optional[int]) -> str:
+    rid = _new_id()
+    with get_conn() as c:
+        c.execute("INSERT INTO agent_runs (id, job_id, candidate_id, event_id, started_at)"
+                  " VALUES (?,?,?,?,?)", (rid, job_id, candidate_id, event_id, now_iso()))
+    return rid
+
+
+def finish_run(run_id: str, status: str, chosen_action: Optional[str] = None,
+               error: Optional[str] = None, trace_url: Optional[str] = None,
+               trace_id: Optional[str] = None) -> None:
+    with get_conn() as c:
+        c.execute("UPDATE agent_runs SET status=?, chosen_action=?, error=?, trace_url=?,"
+                  " langfuse_trace_id=?, ended_at=? WHERE id=?",
+                  (status, chosen_action, error, trace_url, trace_id, now_iso(), run_id))

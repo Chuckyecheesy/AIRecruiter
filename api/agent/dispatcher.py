@@ -112,10 +112,14 @@ def start_dispatcher(handler: Optional[Handler] = None, **kwargs) -> None:
         return
     if handler is None:
         try:
-            from api.agent.graph import run_event as handler  # type: ignore[no-redef]
+            from api.agent.graph import handle_event
         except ImportError:
             log.warning("agent graph not available yet; dispatcher not started")
             return
+        owner = kwargs.setdefault("owner", f"dispatcher-{ULID()}")
+
+        async def handler(event: Event) -> None:  # the dispatcher already holds the candidate lock
+            await handle_event(event, owner=owner)
     if "job_id" not in kwargs:
         from api.config import settings
         kwargs["job_id"] = settings.job_id

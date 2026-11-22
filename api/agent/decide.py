@@ -18,10 +18,14 @@ class DecideOutcome:
     error: Optional[str] = None
 
 
-async def decide_validated(llm: LLMCall, state: CandidateState, job: Any) -> DecideOutcome:
-    valid = valid_actions(state, job)
+async def decide_validated(
+    llm: LLMCall, state: CandidateState, job: Any, valid: Optional[list[ActionName]] = None
+) -> DecideOutcome:
+    """`valid` overrides the candidate table (job-level events have no candidate state)."""
+    if valid is None:
+        valid = valid_actions(state, job)
     if not valid:
-        return DecideOutcome(None, False, 0, f"no valid actions in {CandidateState(state).value}")
+        return DecideOutcome(None, False, 0, f"no valid actions in {getattr(state, 'value', state)}")
     error: Optional[str] = None
     for attempt in (1, 2):
         decision = await llm(list(valid), error)
@@ -29,6 +33,6 @@ async def decide_validated(llm: LLMCall, state: CandidateState, job: Any) -> Dec
             return DecideOutcome(decision, False, attempt)
         error = (
             f"Action '{decision.action.value}' is not valid in state "
-            f"{CandidateState(state).value}. Choose one of: {', '.join(a.value for a in valid)}."
+            f"{getattr(state, 'value', state)}. Choose one of: {', '.join(a.value for a in valid)}."
         )
     return DecideOutcome(None, True, 2, error)
