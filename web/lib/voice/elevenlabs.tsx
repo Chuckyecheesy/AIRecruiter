@@ -62,8 +62,14 @@ export function useElevenLabsIntakeVoice(): IntakeVoice {
   );
 
   const onMessage = useCallback((m: MessagePayload) => {
-    if (!m.message?.trim()) return;
-    setTranscript((xs) => [...xs, { role: m.role === "user" ? "ceo" : "agent", text: m.message, at: new Date().toISOString() }]);
+    const text = m.message?.trim();
+    if (!text) return;
+    const role = m.role === "user" ? "ceo" : "agent";
+    setTranscript((xs) => {
+      const last = xs[xs.length - 1];
+      if (last && last.role === role && last.text.trim() === text) return xs; // same line delivered twice
+      return [...xs, { role, text, at: new Date().toISOString() }];
+    });
   }, []);
 
   const conversation = useConversation({
@@ -78,7 +84,11 @@ export function useElevenLabsIntakeVoice(): IntakeVoice {
     endRef.current = endSession;
   }, [endSession]);
 
+  const startingRef = useRef(false);
   const start = useCallback(async () => {
+    // Never open a second session (double click / re-render): two sessions = every line heard twice.
+    if (startingRef.current || conversation.status === "connected" || conversation.status === "connecting") return;
+    startingRef.current = true;
     setError(null);
     setTranscript([]);
     draftRef.current = EMPTY_DRAFT;
@@ -88,11 +98,13 @@ export function useElevenLabsIntakeVoice(): IntakeVoice {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const auth = await resolveAuth();
-      conversation.startSession({ ...auth, dynamicVariables: { today: new Date().toISOString().slice(0, 10) } });
+      await conversation.startSession({ ...auth, dynamicVariables: { today: new Date().toISOString().slice(0, 10) } });
     } catch (e) {
       setPhase("idle");
       const msg = e instanceof Error ? e.message : String(e);
       setError(/denied|NotAllowed/i.test(msg) ? "Microphone access was blocked. Allow it in the browser and try again." : msg);
+    } finally {
+      startingRef.current = false;
     }
   }, [conversation]);
 
