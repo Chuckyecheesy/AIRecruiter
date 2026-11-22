@@ -359,7 +359,8 @@ class _Deps:
         self.tools, self.llm = tools, llm
 
 
-def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
+def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
+                trace: tracing.RunTrace = tracing.NOOP):
     deps = _Deps(tools, llm)
 
     async def observe(st: AgentState) -> dict:
@@ -411,6 +412,7 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
             from api.config import settings
             llm = make_llm(settings.llm_mode, ctx)
         state = S(st["candidate"]["state"]) if st.get("candidate") else "job"
+        llm = _traced_llm(llm, trace)
         outcome = await decide_validated(llm, state, st["job"], valid=st["valid_actions"],
                                          error=st.get("redecide_error"))
         if outcome.escalate:
@@ -494,7 +496,9 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         while True:
             attempt += 1
             try:
-                result = await fn(tools, st)
+                with trace.span(d.action.value, kind="tool", input=d.args) as sp:
+                    result = await fn(tools, st)
+                    sp.set_output(result)
             except ToolError as e:
                 delay = _retry_delay(e, attempt)
                 if delay is None:
@@ -553,6 +557,7 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         elif action == A.evaluate_candidate:
             ev = result["evaluation"]
             repo.add_evaluation(cid, job["id"], ev)
+            trace.score("evaluation_score", ev["score"])
             repo.emit_event(job["id"], E.Evaluated, cid, {
                 "score": ev["score"], "recommendation": ev["recommendation"]})
 
@@ -581,7 +586,7 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
     g = StateGraph(AgentState)
     for name, fn in [("observe", observe), ("decide", decide), ("permission_check", permission_check),
                      ("execute", execute), ("update_state", update_state), ("escalate", escalate)]:
-        g.add_node(name, fn)
+        g.add_node(name, _traced_node(name, fn, trace))
     g.add_edge(START, "observe")
     for src, targets in {
         "observe": {"decide", "execute", "escalate"}, "decide": {"permission_check", "escalate"},
@@ -593,6 +598,30 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
     g.add_edge("update_state", END)
     g.add_edge("escalate", END)
     return g.compile(checkpointer=checkpointer)
+
+
+def _traced_node(name: str, fn, trace: tracing.RunTrace):
+    async def run(st: AgentState) -> dict:
+        with trace.span(name) as sp:
+            out = await fn(st)
+            sp.set_output({"route": out.get("route")} if isinstance(out, dict) else None)
+            return out
+    return run
+
+
+def _traced_llm(llm, trace: tracing.RunTrace):
+    """One `generation` per decide call, scored decision_valid (1 = the action was offered)."""
+    async def call(valid, error=None):
+        names = [a.value for a in valid]
+        with trace.span("decide", kind="generation",
+                        input={"valid_actions": names, "error": error}) as g:
+            d = await llm(valid, error)
+            g.set_output({"action": d.action.value, "reasoning": d.reasoning})
+        ok = d.action in valid
+        trace.score("decision_valid", 1 if ok else 0,
+                    None if ok else f"{d.action.value} not in valid actions")
+        return d
+    return call
 
 
 def _retry_delay(e: ToolError, attempt: int) -> Optional[float]:
@@ -647,15 +676,15 @@ async def run_event(
     trace = tracing.NOOP
     try:
         cand = repo.get_candidate(cid) if cid else None
-        trace = tracing.start_run_trace(
-            job_id=event.job_id, candidate_id=cid, state=cand["state"] if cand else "job",
+        trace = await asyncio.to_thread(  # may do network I/O; keep it off the event loop
+            tracing.start_run_trace, job_id=event.job_id, candidate_id=cid, state=cand["state"] if cand else "job",
             event_type=event.type.value)
     except Exception:  # noqa: BLE001 - tracing is best-effort
         pass
     try:
         async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
             saver.serde = _SERDE
-            app = build_graph(tools, llm, saver)
+            app = build_graph(tools, llm, saver, trace)
             tid = thread_id_for(event.job_id, cid)
             final = await app.ainvoke(
                 # The thread is reused for every event of a candidate and LangGraph restores the
@@ -677,6 +706,7 @@ async def run_event(
     finally:
         if lock_owner:
             await asyncio.to_thread(repo.release_lock, cid, lock_owner)
+        await asyncio.to_thread(trace.flush)
         d = final.get("decision")
         repo.finish_run(run_id, status, d.action.value if d else None, err,
                         trace_url=trace.url, trace_id=trace.trace_id)
