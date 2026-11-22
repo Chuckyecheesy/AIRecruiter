@@ -170,8 +170,9 @@ class Evaluation(BaseModel):
     summary: str
 
 
+# Used by lane A's process_reply if they want it; lane B provides the classifier.
+# (No docstring: Pydantic sends it to the model as the schema description.)
 class ReplyClassification(BaseModel):
-    """Used by A's process_reply if they want it; B provides the classifier."""
 
     intent: Literal["interested", "declined", "question"]
     reasoning: str

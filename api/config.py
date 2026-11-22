@@ -4,6 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Mode = Literal["mock", "real", "off"]
@@ -18,6 +19,10 @@ class Settings(BaseSettings):
     model_draft: str = "claude-sonnet-5-5"
     model_eval: str = "claude-sonnet-5-5"
     llm_mode: Literal["real", "stub"] = "real"
+    llm_timeout_s: float = 45.0
+    # Used in outreach sign-offs; never invented by the model.
+    company_name: str | None = None
+    ceo_name: str | None = None
 
     # Tool modes (per-tool override wins over TOOLS_MODE)
     tools_mode: Literal["mock", "real"] = "mock"
@@ -40,6 +45,10 @@ class Settings(BaseSettings):
     elevenlabs_poll: bool = False
     elevenlabs_base_url: str = "https://api.elevenlabs.io"
     mock_interview_delay_s: float = 15.0
+    # Signs the per-interview token in the join link (falls back to the webhook secret / API key).
+    interview_token_secret: str | None = None
+    interview_ttl_hours: float = 2.0
+    webhook_max_bytes: int = 2_000_000
 
     # Langfuse
     langfuse_public_key: str | None = None
@@ -59,6 +68,14 @@ class Settings(BaseSettings):
     data_dir: str = "./data"
     public_base_url: str = "http://localhost:8000"
     demo_token: str | None = None
+
+    @field_validator("demo_inbox")
+    @classmethod
+    def _check_demo_inbox(cls, v: str) -> str:
+        local, at, domain = v.strip().partition("@")
+        if not (local and at and "." in domain):
+            raise ValueError(f"DEMO_INBOX must be an email address, got {v!r}")
+        return v.strip()
 
     def mode_for(self, tool: str) -> Mode:
         """Resolve mock/real/off for a tool ("ploid", "fiber", "elevenlabs", "browser")."""

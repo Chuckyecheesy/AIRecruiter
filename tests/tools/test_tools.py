@@ -102,10 +102,14 @@ async def test_rubric_weights_sum_to_one(tools):
     assert abs(sum(c.weight for c in r.criteria) - 1) < 0.01
 
 
-async def test_evaluator_stub_recomputes(tools):
+async def test_evaluator_stub_separates_strong_and_weak(tools):
     r = await tools.rubric.generate(RoleForm(title="AI Engineer", must_haves=["RAG", "TypeScript"]))
-    ev = await tools.evaluator.evaluate({"title": "AI Engineer", "rubric": r.model_dump()}, {})
-    assert ev.score == 85 and ev.recommendation == "shortlist"
+    job = {"title": "AI Engineer", "rubric": r.model_dump()}
+    strong = await tools.evaluator.evaluate(job, {"profile": (await tools.ploid.enrich("pl_001")).model_dump()})
+    weak = await tools.evaluator.evaluate(job, {"profile": (await tools.ploid.enrich("pl_004")).model_dump()})
+    assert strong.score > weak.score
+    assert weak.recommendation == "reject"
+    assert [c.name for c in strong.criteria] == [c.name for c in r.criteria]
 
 
 async def test_elevenlabs_mock_flow(tools):
