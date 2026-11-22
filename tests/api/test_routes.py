@@ -118,10 +118,10 @@ def test_events_poll_cursor_and_delayed(client, seeded):
     assert client.get(f"/api/jobs/{seeded}/events", params={"after": last}).json() == []
 
     # A delayed event is withheld until due.
-    from scripts import dev_fake_repo
+    from api.db import repo
 
-    dev_fake_repo.emit_event(seeded, None, "EmailReplied", {"body": "later"}, not_before="2999-01-01T00:00:00+00:00")
-    dev_fake_repo.emit_event(seeded, None, "EmailSent", {"now": True})
+    repo.emit_event(seeded, "EmailReplied", payload={"body": "later"}, not_before="2999-01-01T00:00:00.000Z")
+    repo.emit_event(seeded, "EmailSent", payload={"now": True})
     fresh = client.get(f"/api/jobs/{seeded}/events", params={"after": last}).json()
     assert [e["type"] for e in fresh] == ["EmailSent"]
 
@@ -146,29 +146,6 @@ def test_sse_stream_sends_events(client, seeded, monkeypatch):
     first = json.loads(data_lines[0])
     assert first["type"] == "JobCreated"
     assert "id: " in body
-
-
-def test_chat_feedback_rejects_focused_approval(client, seeded):
-    a = _approval(client, seeded, "send_outreach")
-    r = client.post(f"/api/jobs/{seeded}/chat",
-                    json={"text": "shorter, mention the AI study assistant", "approvalId": a["id"]})
-    assert r.status_code == 200, r.text
-    assert r.json()["actionTaken"] == "reject"
-    got = client.get(f"/api/approvals/{a['id']}").json()
-    assert got["status"] == "rejected"
-    assert got["feedback"] == "shorter, mention the AI study assistant"
-
-
-def test_chat_commands(client, seeded):
-    r = client.post(f"/api/jobs/{seeded}/chat", json={"text": "status"}).json()
-    assert r["actionTaken"] == "status" and "Sarah Chen" in r["reply"]
-    assert client.post(f"/api/jobs/{seeded}/chat", json={"text": "pause"}).json()["actionTaken"] == "pause"
-    assert client.get(f"/api/jobs/{seeded}").json()["state"] == "PAUSED"
-    assert client.post(f"/api/jobs/{seeded}/chat", json={"text": "resume"}).json()["actionTaken"] == "resume"
-
-    a = _approval(client, seeded, "send_followup")
-    r = client.post(f"/api/jobs/{seeded}/chat", json={"text": "approve", "approvalId": a["id"]}).json()
-    assert r["actionTaken"] == "approve"
 
 
 def test_shortlist(client, seeded):

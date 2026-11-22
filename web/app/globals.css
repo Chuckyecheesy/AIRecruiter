@@ -66,7 +66,7 @@
 }
 
 :root {
-  /* Warm terracotta palette. shadcn/assistant-ui vars map onto the AIRecruiter tokens below. */
+  /* Warm terracotta palette. shadcn vars map onto the AIRecruiter tokens below. */
   --background: #fbf6ef;
   --foreground: #2b2420;
   --card: #fffdf9;
@@ -186,16 +186,4 @@ h3,
   [class*="orb-breathe"] {
     animation: none !important;
   }
-}
-
-/* assistant-ui accents: send button in terracotta, composer lifted off the sand */
-.aui-composer-send {
-  background-color: var(--color-gate);
-  color: var(--color-surface);
-}
-.aui-composer-send:hover {
-  background-color: var(--color-gate-deep);
-}
-[data-slot="aui_composer-shell"] {
-  box-shadow: 0 10px 30px -18px rgba(43, 36, 32, 0.35);
 }

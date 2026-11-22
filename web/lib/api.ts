@@ -3,8 +3,6 @@ import type {
   ApprovalStatus,
   Candidate,
   CandidateDetail,
-  ChatIn,
-  ChatOut,
   Disposition,
   EventRow,
   JobCreateIn,
@@ -72,7 +70,6 @@ export const api = {
     req<Approval>(`/approvals/${id}/reject`, { method: "POST", json: { feedback } }),
 
   events: (jobId: string, after = 0) => req<EventRow[]>(`/jobs/${jobId}/events?after=${after}`),
-  chat: (jobId: string, body: ChatIn) => req<ChatOut>(`/jobs/${jobId}/chat`, { method: "POST", json: body }),
 };
 
 export function streamUrl(jobId: string, after: number) {

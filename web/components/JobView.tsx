@@ -1,58 +1,25 @@
 "use client";
 
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import Link from "next/link";
 import { useEffect, useState, type FC } from "react";
-import { Thread } from "@/components/assistant-ui/thread.aui";
 import { api } from "@/lib/api";
-import { useRecruiterRuntime } from "@/lib/runtime";
 import { useJobStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { ActivityFeed } from "./ActivityFeed";
 import { CandidateDrawer } from "./CandidateDrawer";
-import { Wordmark } from "./TopBar";
-import { Pipeline } from "./Pipeline";
+import { CandidateList } from "./CandidateList";
 import { PolicyToggle } from "./PolicyToggle";
-import { RecruiterToolUIs } from "./tool-uis";
-
-const ACTION_NOUN: Record<string, string> = {
-  send_outreach: "outreach email",
-  send_followup: "follow-up",
-  schedule_interview: "interview",
-  reject_candidate_proposal: "rejection",
-};
-
-const Welcome: FC = () => (
-  <div className="mb-6 px-2">
-    <p className="font-display text-2xl font-medium text-ink">The agent hasn’t done anything yet.</p>
-    <p className="mt-1 text-sm text-quiet">Its decisions, and every action that needs your approval, will show up here.</p>
-  </div>
-);
+import { Btn } from "./tool-uis";
+import { Wordmark } from "./TopBar";
 
 export const JobView: FC<{ jobId: string }> = ({ jobId }) => {
   const connect = useJobStore((s) => s.connect);
   useEffect(() => connect(jobId), [jobId, connect]);
 
-  const runtime = useRecruiterRuntime();
   const job = useJobStore((s) => s.job);
   const error = useJobStore((s) => s.error);
   const streamStatus = useJobStore((s) => s.streamStatus);
-  const candidateFilter = useJobStore((s) => s.candidateFilter);
-  const setFilter = useJobStore((s) => s.setCandidateFilter);
-  const filtered = useJobStore((s) => s.candidates.find((c) => c.id === s.candidateFilter));
-  const focused = useJobStore((s) => (s.focusedApprovalId ? s.approvals[s.focusedApprovalId] : null));
   const pendingCount = useJobStore((s) => Object.values(s.approvals).filter((a) => a.status === "pending").length);
-  const latestPending = useJobStore((s) => {
-    const p = Object.values(s.approvals).filter(
-      (a) => a.status === "pending" && (!s.candidateFilter || a.candidateId === s.candidateFilter),
-    );
-    return p.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
-  });
-  const setFocus = useJobStore((s) => s.setFocusedApproval);
-  const target = focused ?? latestPending;
-
-  const placeholder = target
-    ? `Feedback on ${target.candidateName}’s ${ACTION_NOUN[target.action]}, or “approve”`
-    : "Ask for “status”, or say “pause”";
 
   if (error && !job)
     return (
@@ -66,8 +33,7 @@ export const JobView: FC<{ jobId: string }> = ({ jobId }) => {
     );
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <RecruiterToolUIs />
+    <>
       <div className="flex h-dvh flex-col">
         <header className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line bg-canvas px-4 py-3 sm:px-6">
           <div className="min-w-0">
@@ -93,43 +59,16 @@ export const JobView: FC<{ jobId: string }> = ({ jobId }) => {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <aside className="max-h-64 shrink-0 overflow-y-auto border-b border-line bg-canvas md:max-h-none md:w-76 md:border-r md:border-b-0" aria-label="Pipeline">
-            <Pipeline />
-          </aside>
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
-            {(candidateFilter || target) && (
-              <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-1.5 text-sm">
-                {candidateFilter && (
-                  <span className="flex items-center gap-1.5 rounded-full bg-sunk px-2.5 py-0.5">
-                    Showing only {filtered?.name ?? "one candidate"}
-                    <button type="button" onClick={() => setFilter(null)} className="text-quiet hover:text-ink" aria-label="Show everyone">
-                      ✕
-                    </button>
-                  </span>
-                )}
-                {target && (
-                  <span className="flex items-center gap-1.5 text-quiet">
-                    Your next message applies to{" "}
-                    <span className="text-gate">
-                      {target.candidateName}’s {ACTION_NOUN[target.action]}
-                    </span>
-                    {focused && (
-                      <button type="button" onClick={() => setFocus(null)} className="hover:text-ink" aria-label="Clear selection">
-                        ✕
-                      </button>
-                    )}
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="min-h-0 flex-1">
-              <Thread components={{ Welcome, composerPlaceholder: placeholder }} autoFocus={false} />
-            </div>
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-surface" aria-label="Candidates">
+            <CandidateList />
           </main>
+          <aside className="h-72 shrink-0 border-t border-line bg-canvas md:h-auto md:w-80 md:border-t-0 md:border-l" aria-label="Activity">
+            <ActivityFeed />
+          </aside>
         </div>
       </div>
       <CandidateDrawer />
-    </AssistantRuntimeProvider>
+    </>
   );
 };
 
@@ -148,18 +87,20 @@ const JobStateControl: FC = () => {
   };
   const label = { DRAFT: "Not started", ACTIVE: "Running", PAUSED: "Paused", COMPLETE: "Complete" }[job.state];
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className={cn("size-2 rounded-full", job.state === "ACTIVE" ? "bg-ok" : job.state === "PAUSED" ? "bg-gate" : "bg-line")} />
-      <span className="text-ink">{label}</span>
+    <div className="flex items-center gap-3 text-sm">
+      <span className="flex items-center gap-2">
+        <span className={cn("size-2 rounded-full", job.state === "ACTIVE" ? "bg-ok" : job.state === "PAUSED" ? "bg-gate" : "bg-line")} />
+        <span className="text-ink">{label}</span>
+      </span>
       {job.state === "ACTIVE" && (
-        <button type="button" disabled={busy} onClick={() => act(() => api.pauseJob(job.id))} className="text-quiet underline underline-offset-2 hover:text-ink">
+        <Btn disabled={busy} onClick={() => act(() => api.pauseJob(job.id))}>
           Pause
-        </button>
+        </Btn>
       )}
       {job.state === "PAUSED" && (
-        <button type="button" disabled={busy} onClick={() => act(() => api.resumeJob(job.id))} className="text-quiet underline underline-offset-2 hover:text-ink">
+        <Btn tone="primary" disabled={busy} onClick={() => act(() => api.resumeJob(job.id))}>
           Resume
-        </button>
+        </Btn>
       )}
       {job.state === "DRAFT" && (
         <button type="button" disabled={busy} onClick={() => act(() => api.startJob(job.id))} className="rounded-full bg-gate px-3.5 py-1 text-surface transition hover:bg-gate-deep">

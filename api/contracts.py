@@ -29,9 +29,9 @@ class CandidateState(StrEnum):
     OUTREACH_DRAFTED = "OUTREACH_DRAFTED"
     APPROVED = "APPROVED"
     CONTACTED = "CONTACTED"
-    INTERESTED = "INTERESTED"
     DECLINED = "DECLINED"
     STALE = "STALE"
+    INTERESTED = "INTERESTED"
     INTERVIEWING = "INTERVIEWING"
     INTERVIEWED = "INTERVIEWED"
     EVALUATED = "EVALUATED"
@@ -40,19 +40,14 @@ class CandidateState(StrEnum):
     NEEDS_HUMAN = "NEEDS_HUMAN"
 
 
-TERMINAL_STATES = frozenset(
-    {CandidateState.SHORTLISTED, CandidateState.REJECTED, CandidateState.DECLINED}
-)
-
-
-class JobState(StrEnum):
+class JobState(str, Enum):
     DRAFT = "DRAFT"
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
     COMPLETE = "COMPLETE"
 
 
-class EventType(StrEnum):
+class EventType(str, Enum):
     JobCreated = "JobCreated"
     CandidateFound = "CandidateFound"
     CandidateEnriched = "CandidateEnriched"
@@ -72,34 +67,91 @@ class EventType(StrEnum):
     HumanResolved = "HumanResolved"
 
 
-class ActionName(StrEnum):
+class ActionName(str, Enum):
     search_candidates = "search_candidates"
     enrich_candidate = "enrich_candidate"
     browser_research = "browser_research"
     find_contact = "find_contact"
     draft_outreach = "draft_outreach"
     redraft_outreach = "redraft_outreach"
-    draft_reply = "draft_reply"
     send_outreach = "send_outreach"
     send_followup = "send_followup"
+    draft_reply = "draft_reply"
     process_reply = "process_reply"
-    wait = "wait"
     mark_stale = "mark_stale"
     schedule_interview = "schedule_interview"
     process_interview = "process_interview"
     evaluate_candidate = "evaluate_candidate"
     shortlist = "shortlist"
     reject_candidate_proposal = "reject_candidate_proposal"
+    wait = "wait"
     escalate = "escalate"
     resume = "resume"
     reactivate = "reactivate"
 
 
-class PermissionClass(StrEnum):
+class PermissionClass(str, Enum):
     READ = "READ"
     WRITE = "WRITE"
     RESTRICTED = "RESTRICTED"
 
+
+class Decision(BaseModel):
+    """Structured output of the decide node."""
+    action: ActionName
+    args: dict[str, Any] = Field(default_factory=dict)
+    reasoning: str
+
+
+class Approval(BaseModel):
+    id: str
+    job_id: str
+    candidate_id: str
+    action: ActionName
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "approved", "rejected", "expired", "executed"] = "pending"
+    reasoning: str = ""
+    decided_by: Optional[Literal["ceo", "auto"]] = None
+    feedback: Optional[str] = None
+    created_at: Optional[str] = None
+    decided_at: Optional[str] = None
+    executed_at: Optional[str] = None
+
+
+class Event(BaseModel):
+    id: Optional[int] = None  # autoincrement ordering cursor
+    job_id: str
+    candidate_id: Optional[str] = None  # None for job-level events
+    type: EventType
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "processing", "done", "failed"] = "pending"
+    not_before: Optional[str] = None
+    attempts: int = 0
+    created_at: Optional[str] = None
+    processed_at: Optional[str] = None
+
+
+class CandidateMemory(BaseModel):
+    """Single source of truth for one candidate (blackboard)."""
+    candidate_id: str
+    profile: dict[str, Any] = Field(default_factory=dict)
+    research_notes: dict[str, Any] = Field(default_factory=dict)
+    contact: dict[str, Any] = Field(default_factory=dict)
+    contact_log: list[dict[str, Any]] = Field(default_factory=list)
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    summary: str = ""
+    updated_at: Optional[str] = None
+
+
+# ─────────────────── Shared helpers (used by routes / dashboard) ───────────────────
+# Everything below is additive; the lane A models above are unchanged.
+
+from pydantic import ConfigDict  # noqa: E402
+from pydantic.alias_generators import to_camel  # noqa: E402
+
+TERMINAL_STATES = frozenset(
+    {CandidateState.SHORTLISTED, CandidateState.REJECTED, CandidateState.DECLINED}
+)
 
 RESTRICTED_ACTIONS = (
     ActionName.send_outreach,
@@ -113,7 +165,7 @@ RestrictedAction = Literal[
 ]
 
 
-class ApprovalStatus(StrEnum):
+class ApprovalStatus(str, Enum):
     pending = "pending"
     approved = "approved"
     rejected = "rejected"
@@ -121,7 +173,7 @@ class ApprovalStatus(StrEnum):
     executed = "executed"
 
 
-class EventStatus(StrEnum):
+class EventStatus(str, Enum):
     pending = "pending"
     processing = "processing"
     done = "done"
@@ -129,9 +181,6 @@ class EventStatus(StrEnum):
 
 
 Disposition = Literal["interested", "not_interested", "asks_question", "no_reply"]
-
-
-# ─────────────────────────── 2. Core records ───────────────────────────
 
 
 class CoreModel(BaseModel):
@@ -145,22 +194,22 @@ class PermissionPolicy(CoreModel):
     restricted_actions: list[str] = Field(default_factory=lambda: [a.value for a in RESTRICTED_ACTIONS])
     auto_approve: bool = False
     auto_approve_actions: list[str] = Field(default_factory=list)
-    approval_timeout_minutes: int | None = None
+    approval_timeout_minutes: Optional[int] = None
 
 
 class JobForm(CoreModel):
     title: str
     must_haves: list[str] = Field(default_factory=list)
     nice_to_haves: list[str] = Field(default_factory=list)
-    location: str | None = None
-    seniority: str | None = None
-    free_text: str | None = None
+    location: Optional[str] = None
+    seniority: Optional[str] = None
+    free_text: Optional[str] = None
 
 
 class RubricCriterion(CoreModel):
     name: str
     weight: float
-    description: str | None = None
+    description: Optional[str] = None
 
 
 class Rubric(CoreModel):
@@ -168,93 +217,25 @@ class Rubric(CoreModel):
     interview_themes: list[str] = Field(default_factory=list)
 
 
-class Decision(CoreModel):
-    action: ActionName
-    args: dict[str, Any] = Field(default_factory=dict)
-    reasoning: str = ""
-
-
-# Documentation of the common keys only. CandidateMemory stores these lists as plain dicts because
-# lane A writes several entry kinds with different keys (e.g. contact_log entries of kind
-# email_out / email_in / draft / interview / reactivated, with to/subject/body/turns) and reads
-# them with dict access. Extra keys are allowed if you do validate an entry with these models.
-class DecisionLogEntry(CoreModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
-
-    ts: str | None = None
-    action: str | None = None
-    reasoning: str = ""
-    outcome: str | None = None
-
-
-class ContactLogEntry(CoreModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
-
-    ts: str | None = None
-    kind: str | None = None  # lane A: email_out | email_in | draft | interview | reactivated
-    channel: str | None = None
-    action: str | None = None
-    message_id: str | None = None
-
-
-class CandidateMemory(CoreModel):
-    candidate_id: str
-    profile: dict[str, Any] = Field(default_factory=dict)
-    research_notes: dict[str, Any] = Field(default_factory=dict)
-    contact: dict[str, Any] = Field(default_factory=dict)
-    contact_log: list[dict[str, Any]] = Field(default_factory=list)  # see ContactLogEntry
-    decisions: list[dict[str, Any]] = Field(default_factory=list)    # see DecisionLogEntry
-    summary: str = ""
-    updated_at: str | None = None
-
-
-class ApprovalRecord(CoreModel):
-    """DB-shaped approval row (snake_case)."""
-
-    id: str
-    job_id: str
-    candidate_id: str
-    action: ActionName  # always one of RESTRICTED_ACTIONS in practice (lane A enforces it)
-    payload: dict[str, Any] = Field(default_factory=dict)
-    status: ApprovalStatus = ApprovalStatus.pending
-    reasoning: str = ""
-    decided_by: Literal["ceo", "auto"] | None = None
-    feedback: str | None = None
-    created_at: str | None = None  # set by the DB layer on insert
-    decided_at: str | None = None
-    executed_at: str | None = None
-
-
-# Lane A's original name (api/db/repo.py, api/agent/*). Same model.
-Approval = ApprovalRecord
-
-
-class Event(CoreModel):
-    """DB-shaped events row (snake_case)."""
-
-    id: int | None = None  # autoincrement cursor; None before insert
-    job_id: str
-    candidate_id: str | None = None
-    type: EventType
-    payload: dict[str, Any] = Field(default_factory=dict)
-    status: EventStatus = EventStatus.pending
-    not_before: str | None = None
-    attempts: int = 0
-    created_at: str | None = None  # set by the DB layer on insert
-    processed_at: str | None = None
-
-
-# ───────────────────────── 3. Tool I/O (lane B) ─────────────────────────
-# TODO(lane B, kickoff): SearchCriteria, PloidCandidate, EnrichedProfile, ContactInfo,
-# BrowserFindings, SendReceipt, InterviewSession, InterviewTranscript, Draft, Evaluation.
-
-
-# ─────────────────────── 4. API shapes (spec 06, lane C) ───────────────────────
+# ─────────────────────── API shapes (spec 06, lane C) ───────────────────────
 # Responses are camelCase on the wire (mirrors web/lib/types.ts).
 
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, serialize_by_alias=True)
+
+
+class CandidateMemoryOut(ApiModel):
+    """CandidateMemory as the dashboard sees it (camelCase keys; log entries are free-form)."""
+
+    candidate_id: str
+    profile: dict[str, Any] = Field(default_factory=dict)
+    research_notes: dict[str, Any] = Field(default_factory=dict)
+    contact: dict[str, Any] = Field(default_factory=dict)
+    contact_log: list[dict[str, Any]] = Field(default_factory=list)
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    summary: str = ""
+    updated_at: Optional[str] = None
 
 
 class CandidateOut(ApiModel):
@@ -356,7 +337,7 @@ class EvaluationOut(ApiModel):
 class CandidateDetailOut(CandidateOut):
     job_id: str
     prev_state: CandidateState | None = None
-    memory: CandidateMemory | None = None
+    memory: CandidateMemoryOut | None = None
     messages: list[MessageOut] = Field(default_factory=list)
     interview: InterviewOut | None = None
     evaluation: EvaluationOut | None = None

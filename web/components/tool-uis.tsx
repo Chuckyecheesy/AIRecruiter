@@ -1,16 +1,15 @@
 "use client";
 
-import { makeAssistantToolUI } from "@assistant-ui/react";
 import { useState, type FC, type ReactNode } from "react";
 import { api } from "@/lib/api";
-import { fmtDuration } from "@/lib/runtime";
+import { fmtDuration } from "@/lib/activity";
 import { useCandidateDetail, useJobStore } from "@/lib/store";
 import type { Approval, Evaluation, Interview } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /* ───────────────────────── shared bits ───────────────────────── */
 
-const CandidateLink: FC<{ id: string | null | undefined; name: string | null | undefined }> = ({ id, name }) => {
+export const CandidateLink: FC<{ id: string | null | undefined; name: string | null | undefined }> = ({ id, name }) => {
   const open = useJobStore((s) => s.openDrawer);
   if (!id) return <span>{name ?? "candidate"}</span>;
   return (
@@ -48,7 +47,7 @@ function useApprovalActions(a: Approval | null) {
   };
 }
 
-const Btn: FC<{
+export const Btn: FC<{
   onClick?: () => void;
   disabled?: boolean;
   tone?: "primary" | "plain" | "danger";
@@ -79,19 +78,15 @@ const ACTION_TITLE: Record<string, string> = {
 
 /** The gate: every restricted action renders inside this frame. */
 const Gate: FC<{ approval: Approval | null; children: ReactNode; footer?: ReactNode }> = ({ approval, children, footer }) => {
-  const focused = useJobStore((s) => s.focusedApprovalId === approval?.id);
-  const setFocus = useJobStore((s) => s.setFocusedApproval);
   if (!approval)
-    return <div className="my-2 h-28 animate-pulse rounded-2xl border border-line bg-surface motion-reduce:animate-none" />;
+    return <div className="h-28 animate-pulse rounded-2xl border border-line bg-surface motion-reduce:animate-none" />;
   const pending = approval.status === "pending";
   return (
     <section
       aria-label={`${ACTION_TITLE[approval.action]} for ${approval.candidateName}`}
-      onClick={() => pending && setFocus(approval.id)}
       className={cn(
-        "my-3 overflow-hidden rounded-2xl border bg-surface",
+        "overflow-hidden rounded-2xl border bg-surface",
         pending ? "border-gate/50 shadow-[0_0_0_4px_rgba(194,86,46,0.08)]" : "border-line",
-        focused && "ring-2 ring-gate/40",
       )}
     >
       <header className="flex flex-wrap items-baseline justify-between gap-2 px-5 pt-4">
@@ -182,7 +177,7 @@ const Decide: FC<{
 
 /* ───────────────────────── EmailDraftCard ───────────────────────── */
 
-const EmailDraftCard: FC<{ args: { approvalId: string } }> = ({ args }) => {
+export const EmailDraftCard: FC<{ args: { approvalId: string } }> = ({ args }) => {
   const approval = useApproval(args.approvalId);
   const [subject, setSubject] = useState<string | null>(null);
   const [body, setBody] = useState<string | null>(null);
@@ -291,7 +286,7 @@ const InterviewLive: FC<{ interview: Interview }> = ({ interview }) => {
   );
 };
 
-const InterviewCard: FC<{ args: { approvalId: string; candidateId: string } }> = ({ args }) => {
+export const InterviewCard: FC<{ args: { approvalId: string; candidateId: string } }> = ({ args }) => {
   const approval = useApproval(args.approvalId);
   const detail = useCandidateDetail(approval?.status === "pending" ? null : args.candidateId);
   const questions: string[] = approval?.payload?.questions ?? [];
@@ -313,22 +308,9 @@ const InterviewCard: FC<{ args: { approvalId: string; candidateId: string } }> =
   );
 };
 
-const InterviewOnlyCard: FC<{ args: { candidateId: string } }> = ({ args }) => {
-  const detail = useCandidateDetail(args.candidateId);
-  if (!detail?.interview) return null;
-  return (
-    <section className="my-3 rounded-2xl border border-line bg-surface px-4 py-3">
-      <h3 className="text-[15px] font-semibold text-ink">
-        Voice interview with <CandidateLink id={detail.id} name={detail.name} />
-      </h3>
-      <InterviewLive interview={detail.interview} />
-    </section>
-  );
-};
-
 /* ───────────────────────── RejectionCard ───────────────────────── */
 
-const RejectionCard: FC<{ args: { approvalId: string } }> = ({ args }) => {
+export const RejectionCard: FC<{ args: { approvalId: string } }> = ({ args }) => {
   const approval = useApproval(args.approvalId);
   const p = approval?.payload ?? {};
   return (
@@ -355,7 +337,7 @@ const RejectionCard: FC<{ args: { approvalId: string } }> = ({ args }) => {
 
 /* ───────────────────────── Evaluation ───────────────────────── */
 
-const ScoreDial: FC<{ score: number; threshold?: number }> = ({ score, threshold }) => {
+export const ScoreDial: FC<{ score: number; threshold?: number }> = ({ score, threshold }) => {
   const pass = threshold == null ? score >= 75 : score >= threshold;
   return (
     <div
@@ -400,23 +382,9 @@ export const EvaluationBody: FC<{ evaluation: Evaluation; threshold?: number }> 
   </div>
 );
 
-const EvaluationCard: FC<{ args: { candidateId: string; evaluationId?: string; score?: number } }> = ({ args }) => {
-  const detail = useCandidateDetail(args.candidateId);
-  const threshold = useJobStore((s) => s.job?.scoreThreshold);
-  const ev = detail?.evaluation;
-  return (
-    <section className="my-3 rounded-2xl border border-line bg-surface px-4 py-3">
-      <h3 className="mb-2 text-[15px] font-semibold text-ink">
-        Evaluation of <CandidateLink id={args.candidateId} name={detail?.name} />
-      </h3>
-      {ev ? <EvaluationBody evaluation={ev} threshold={threshold} /> : <p className="text-sm text-quiet">Score {args.score ?? "…"}</p>}
-    </section>
-  );
-};
-
 /* ───────────────────────── Needs human ───────────────────────── */
 
-const NeedsHumanCard: FC<{ args: { candidateId: string; error: string; traceUrl: string | null } }> = ({ args }) => {
+export const NeedsHumanCard: FC<{ args: { candidateId: string; error: string; traceUrl: string | null } }> = ({ args }) => {
   const cand = useJobStore((s) => s.candidates.find((c) => c.id === args.candidateId));
   const refresh = useJobStore((s) => s.refreshCandidates);
   const [busy, setBusy] = useState(false);
@@ -431,7 +399,7 @@ const NeedsHumanCard: FC<{ args: { candidateId: string; error: string; traceUrl:
     }
   };
   return (
-    <section className={cn("my-3 rounded-2xl border bg-surface px-4 py-3", stillStuck ? "border-danger/50 shadow-[0_0_0_4px_rgba(179,38,30,0.07)]" : "border-line")}>
+    <section className={cn("rounded-2xl border bg-surface px-4 py-3", stillStuck ? "border-danger/50 shadow-[0_0_0_4px_rgba(179,38,30,0.07)]" : "border-line")}>
       <h3 className="text-[15px] font-semibold text-ink">
         <CandidateLink id={args.candidateId} name={cand?.name} /> needs you
       </h3>
@@ -463,7 +431,7 @@ const NeedsHumanCard: FC<{ args: { candidateId: string; error: string; traceUrl:
 
 /* ───────────────────────── quiet lines ───────────────────────── */
 
-const DecisionNote: FC<{ args: { candidateId: string | null; candidateName: string | null; label: string; reasoning: string } }> = ({ args }) => {
+export const DecisionNote: FC<{ args: { candidateId: string | null; candidateName: string | null; label: string; reasoning: string } }> = ({ args }) => {
   const [open, setOpen] = useState(false);
   return (
     <div className="my-1 text-sm">
@@ -484,14 +452,14 @@ const DecisionNote: FC<{ args: { candidateId: string | null; candidateName: stri
   );
 };
 
-const StatusLine: FC<{ args: { icon: string; text: string; tone?: "warn" } }> = ({ args }) => (
+export const StatusLine: FC<{ args: { icon: string; text: string; tone?: "warn" } }> = ({ args }) => (
   <p className={cn("my-1 flex items-baseline gap-2 text-sm", args.tone === "warn" ? "text-danger" : "text-ink")}>
     <span aria-hidden className="w-4 shrink-0 text-center">{args.icon}</span>
     <span>{args.text}</span>
   </p>
 );
 
-const DuplicateNote: FC<{ args: { name: string; existingCandidateId: string; reason?: string | null } }> = ({ args }) => {
+export const DuplicateNote: FC<{ args: { name: string; existingCandidateId: string; reason?: string | null } }> = ({ args }) => {
   const existing = useJobStore((s) => s.candidates.find((c) => c.id === args.existingCandidateId));
   return (
     <p className="my-1 flex items-baseline gap-2 text-sm text-quiet">
@@ -510,28 +478,18 @@ function lowerFirst(s: string) {
   return s[0].toLowerCase() + s.slice(1);
 }
 
-/* ───────────────────────── registration ───────────────────────── */
+/* ───────────────────────── inline approval ───────────────────────── */
 
-const ui = (toolName: string, Comp: FC<{ args: any }>) =>
-  makeAssistantToolUI<any, any>({ toolName, display: "standalone", render: ({ args }) => <Comp args={args} /> });
-
-const TOOL_UIS = [
-  ui("send_outreach", EmailDraftCard),
-  ui("send_followup", EmailDraftCard),
-  ui("schedule_interview", InterviewCard),
-  ui("reject_candidate_proposal", RejectionCard),
-  ui("interview", InterviewOnlyCard),
-  ui("evaluate_candidate", EvaluationCard),
-  ui("escalated", NeedsHumanCard),
-  ui("decision", DecisionNote),
-  ui("status", StatusLine),
-  ui("duplicate", DuplicateNote),
-];
-
-export const RecruiterToolUIs: FC = () => (
-  <>
-    {TOOL_UIS.map((T, i) => (
-      <T key={i} />
-    ))}
-  </>
-);
+/** Picks the right gate card for a pending (or decided) approval, rendered inline under its candidate. */
+export const ApprovalCard: FC<{ approvalId: string; candidateId: string }> = ({ approvalId, candidateId }) => {
+  const approval = useApproval(approvalId);
+  if (!approval) return <Gate approval={null}>{null}</Gate>;
+  switch (approval.action) {
+    case "schedule_interview":
+      return <InterviewCard args={{ approvalId, candidateId }} />;
+    case "reject_candidate_proposal":
+      return <RejectionCard args={{ approvalId }} />;
+    default:
+      return <EmailDraftCard args={{ approvalId }} />;
+  }
+};

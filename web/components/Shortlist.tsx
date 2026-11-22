@@ -67,8 +67,7 @@ export const Shortlist: FC<{ jobId: string }> = ({ jobId }) => {
         )}
       </div>
       <p className="mt-3 max-w-xl text-quiet">
-        Everyone the recruiter has interviewed and scored, best first.{" "}
-        {job ? `Shortlisted means they cleared your bar of ${job.scoreThreshold}.` : ""} Click a name for their full profile.
+        Everyone the recruiter has interviewed and scored, best first. Click a name for their full profile.
       </p>
       {err && <p className="mt-6 text-danger">{err}</p>}
       {rows && rows.length === 0 && <p className="mt-6 text-quiet">Nobody has been evaluated yet. Candidates appear here after their interview is scored.</p>}

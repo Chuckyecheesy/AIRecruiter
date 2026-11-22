@@ -19,7 +19,7 @@ def _pending_or_409(conn: sqlite3.Connection, approval_id: str) -> ApprovalOut:
     if not a:
         raise HTTPException(404, "approval not found")
     if a.status != ApprovalStatus.pending:
-        raise HTTPException(409, f"approval is already {a.status}")
+        raise HTTPException(409, f"approval is already {a.status.value}")
     return a
 
 
