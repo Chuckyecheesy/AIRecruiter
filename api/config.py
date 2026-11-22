@@ -1,7 +1,16 @@
 """All env-driven settings (lane B). Everyone imports `settings` from here."""
 from __future__ import annotations
 
+import os
+import sys
 from functools import lru_cache
+
+from dotenv import load_dotenv
+
+# Some modules (Langfuse tracing, checkpoint path) read os.environ directly; make local .env values
+# visible to them too. Real environment variables (Docker/Maritime secrets) always win.
+if "pytest" not in sys.modules:  # tests stay hermetic
+    load_dotenv(".env", override=False)
 from typing import Literal
 
 from pydantic import field_validator
