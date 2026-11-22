@@ -62,6 +62,9 @@ class Settings(BaseSettings):
 
     # Runtime
     persona_delay_s: float = 15.0
+    followup_after_hours: float = 24.0  # one nudge after this long without a reply
+    stale_after_hours: float = 48.0     # then mark_stale after this long without a reply to the nudge
+    tick_interval_s: float = 15.0
     max_concurrent_runs: int = 4
     job_id: str | None = None
     admin_enabled: bool = False
