@@ -653,6 +653,10 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
         _record_lifecycle(d.action, result, cid, job)
         if d.action in NEXT_EVENT:
             repo.emit_event(st["job_id"], NEXT_EVENT[d.action], cid, {"from": cand["state"]})
+        elif d.action == A.process_reply and new_state == S.INTERESTED:
+            # Wake the agent again so INTERESTED -> schedule_interview happens (spec 01: EmailReplied
+            # triggers schedule_interview). A "question" reply stays CONTACTED and waits for the next reply.
+            repo.emit_event(st["job_id"], E.EmailReplied, cid, {"from": cand["state"], "after": "interested"})
         return {}
 
     def _record_lifecycle(action: A, result: dict, cid: str, job: dict) -> None:

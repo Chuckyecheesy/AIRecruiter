@@ -130,12 +130,19 @@ class GeminiLLM:
             # Thinking tokens count against the output budget on Gemini; leave headroom.
             max_output_tokens=max(max_tokens, 8192),
         )
-        try:
-            resp = await self._client.aio.models.generate_content(model=self.model, contents=prompt, config=config)
-        except errors.APIError as e:
-            raise _gemini_error(e) from e
-        except (httpx.TransportError, TimeoutError, OSError) as e:
-            raise ToolError("transient", f"gemini connection error: {type(e).__name__}") from e
+        import asyncio
+        for attempt in range(4):  # Gemini often 503s ("high demand"): short in-place retries
+            try:
+                resp = await self._client.aio.models.generate_content(model=self.model, contents=prompt, config=config)
+                break
+            except errors.APIError as e:
+                err = _gemini_error(e)
+                if err.kind != "transient" or attempt == 3:
+                    raise err from e
+            except (httpx.TransportError, TimeoutError, OSError) as e:
+                if attempt == 3:
+                    raise ToolError("transient", f"gemini connection error: {type(e).__name__}") from e
+            await asyncio.sleep(1.5 * 2 ** attempt)
 
         block = getattr(getattr(resp, "prompt_feedback", None), "block_reason", None)
         if block:
