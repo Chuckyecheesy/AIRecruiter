@@ -28,6 +28,7 @@ from api.contracts import (
     Approval,
     CandidateMemory,
     CandidateState,
+    Event,
     EventType,
     JobState,
 )
@@ -487,3 +488,179 @@ def release_stale_locks(stale_after_s: int = 120) -> int:
                 c.execute("UPDATE candidates SET locked_by=NULL, locked_at=NULL WHERE id=?", (r["id"],))
                 cleared += 1
     return cleared
+
+
+# ---------- event queue (dispatcher) ----------
+
+def _event(r: sqlite3.Row) -> Event:
+    d = dict(r)
+    d["payload"] = json.loads(d["payload"])
+    return Event(**d)
+
+
+def fetch_due_events(limit: int = 10, job_id: Optional[str] = None) -> list[Event]:
+    """Pending events that are due, oldest first, for ACTIVE jobs only.
+
+    Events of PAUSED/DRAFT/COMPLETE jobs stay pending until the job is ACTIVE again.
+    """
+    sql = ("SELECT e.* FROM events e JOIN jobs j ON j.id = e.job_id "
+           "WHERE e.status='pending' AND j.state=? AND (e.not_before IS NULL OR e.not_before <= ?)")
+    args: list[Any] = [JobState.ACTIVE.value, now_iso()]
+    if job_id is not None:
+        sql += " AND e.job_id=?"
+        args.append(job_id)
+    sql += " ORDER BY e.id LIMIT ?"
+    args.append(limit)
+    with get_conn() as c:
+        return [_event(r) for r in c.execute(sql, args).fetchall()]
+
+
+def claim_event(event_id: int) -> bool:
+    """Atomic pending -> processing. `processed_at` holds the claim time meanwhile."""
+    with get_conn() as c:
+        cur = c.execute("UPDATE events SET status='processing', processed_at=? "
+                        "WHERE id=? AND status='pending'", (now_iso(), event_id))
+        return cur.rowcount == 1
+
+
+def mark_event_done(event_id: int) -> None:
+    with get_conn() as c:
+        c.execute("UPDATE events SET status='done', processed_at=? WHERE id=?", (now_iso(), event_id))
+
+
+def mark_event_failed(event_id: int, max_attempts: int = 3) -> bool:
+    """attempts += 1. Retry (back to pending) below max_attempts; else 'failed'.
+
+    Returns True when attempts are exhausted and the caller should escalate.
+    """
+    with get_conn() as c:
+        r = c.execute("SELECT attempts FROM events WHERE id=?", (event_id,)).fetchone()
+        if r is None:
+            raise LookupError(f"event {event_id} not found")
+        attempts = r["attempts"] + 1
+        exhausted = attempts >= max_attempts
+        c.execute("UPDATE events SET status=?, attempts=?, processed_at=? WHERE id=?",
+                  ("failed" if exhausted else "pending", attempts,
+                   now_iso() if exhausted else None, event_id))
+        return exhausted
+
+
+def reset_stuck_events(stale_after_s: int = 120) -> int:
+    """Crash recovery: 'processing' rows claimed longer ago than the threshold -> 'pending'."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_after_s)
+    n = 0
+    with get_conn() as c:
+        for r in c.execute("SELECT id, processed_at FROM events WHERE status='processing'").fetchall():
+            if r["processed_at"] is None or _parse_ts(r["processed_at"]) <= cutoff:
+                c.execute("UPDATE events SET status='pending', processed_at=NULL WHERE id=?", (r["id"],))
+                n += 1
+    return n
+
+
+# ---------- agent graph support (lane A) ----------
+
+def set_candidate_state(candidate_id: str, state: CandidateState) -> None:
+    """Apply a state change decided by `apply_transition` (code only, never the LLM)."""
+    with get_conn() as c:
+        _candidate_row(c, candidate_id)
+        c.execute("UPDATE candidates SET state=?, updated_at=? WHERE id=?",
+                  (CandidateState(state).value, now_iso(), candidate_id))
+
+
+def escalate_candidate(candidate_id: str, reason: str, trace_url: Optional[str] = None) -> bool:
+    """-> NEEDS_HUMAN, remembering prev_state; emits Escalated. False if already escalated."""
+    with get_conn() as c:
+        r = _candidate_row(c, candidate_id)
+        state = CandidateState(r["state"])
+        if state == CandidateState.NEEDS_HUMAN:
+            return False
+        c.execute("UPDATE candidates SET state=?, prev_state=?, trace_url=?, updated_at=? WHERE id=?",
+                  (CandidateState.NEEDS_HUMAN.value, state.value, trace_url, now_iso(), candidate_id))
+        _emit(c, r["job_id"], EventType.Escalated, candidate_id,
+              {"reason": reason, "prev_state": state.value, "trace_url": trace_url})
+        return True
+
+
+def find_duplicate_candidate(job_id: str, ploid_id: str, name: str,
+                             urls: list[str]) -> Optional[str]:
+    """Duplicate guard: same (job, ploid_id), or same name_key plus a shared profile URL."""
+    name_key = re.sub(r"[\W_]+", "", name.lower())
+    wanted = {u.strip().lower().rstrip("/") for u in urls if u}
+    with get_conn() as c:
+        r = c.execute("SELECT id FROM candidates WHERE job_id=? AND ploid_id=?",
+                      (job_id, ploid_id)).fetchone()
+        if r:
+            return r["id"]
+        for r in c.execute("SELECT id FROM candidates WHERE job_id=? AND name_key=?",
+                           (job_id, name_key)).fetchall():
+            prof = _memory(c, r["id"]).profile
+            have = {str(u).strip().lower().rstrip("/") for u in
+                    list((prof.get("links") or {}).values()) + list(prof.get("profile_urls") or [])}
+            if wanted & have:
+                return r["id"]
+    return None
+
+
+def count_candidates(job_id: str) -> int:
+    with get_conn() as c:
+        return c.execute("SELECT count(*) FROM candidates WHERE job_id=?", (job_id,)).fetchone()[0]
+
+
+def append_decision(candidate_id: str, entry: dict[str, Any]) -> None:
+    with get_conn() as c:
+        decisions = _memory(c, candidate_id).decisions + [entry]
+        _write_memory(c, candidate_id, {"decisions": decisions})
+
+
+def get_tool_call(idempotency_key: str) -> Optional[dict[str, Any]]:
+    with get_conn() as c:
+        r = c.execute("SELECT * FROM tool_calls WHERE idempotency_key=?", (idempotency_key,)).fetchone()
+    if r is None:
+        return None
+    d = dict(r)
+    for k in ("input", "output"):
+        d[k] = json.loads(d[k]) if d[k] else None
+    return d
+
+
+def record_tool_call(
+    *, run_id: Optional[str], candidate_id: Optional[str], tool: str, action: ActionName,
+    idempotency_key: str, input: Any, output: Any, status: str,
+    error_kind: Optional[str] = None, attempts: int = 1, latency_ms: Optional[int] = None,
+) -> None:
+    """Upsert by idempotency_key (a retried event overwrites its earlier error row)."""
+    with get_conn() as c:
+        c.execute(
+            "INSERT INTO tool_calls (id, run_id, candidate_id, tool, action, idempotency_key, input,"
+            " output, status, error_kind, attempts, latency_ms, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(idempotency_key) DO UPDATE SET run_id=excluded.run_id, output=excluded.output,"
+            " status=excluded.status, error_kind=excluded.error_kind, attempts=excluded.attempts,"
+            " latency_ms=excluded.latency_ms",
+            (_new_id(), run_id, candidate_id, tool, ActionName(action).value, idempotency_key,
+             json.dumps(input, default=str), json.dumps(output, default=str), status, error_kind,
+             attempts, latency_ms, now_iso()))
+
+
+def start_run(job_id: str, candidate_id: Optional[str], event_id: Optional[int]) -> str:
+    rid = _new_id()
+    with get_conn() as c:
+        c.execute("INSERT INTO agent_runs (id, job_id, candidate_id, event_id, started_at)"
+                  " VALUES (?,?,?,?,?)", (rid, job_id, candidate_id, event_id, now_iso()))
+    return rid
+
+
+def finish_run(run_id: str, status: str, chosen_action: Optional[str] = None,
+               error: Optional[str] = None, trace_url: Optional[str] = None,
+               trace_id: Optional[str] = None) -> None:
+    with get_conn() as c:
+        c.execute("UPDATE agent_runs SET status=?, chosen_action=?, error=?, trace_url=?,"
+                  " langfuse_trace_id=?, ended_at=? WHERE id=?",
+                  (status, chosen_action, error, trace_url, trace_id, now_iso(), run_id))
+
+
+def get_pending_approval(candidate_id: str, action: ActionName) -> Optional[Approval]:
+    with get_conn() as c:
+        r = c.execute("SELECT * FROM approvals WHERE candidate_id=? AND action=? AND status='pending'"
+                      " ORDER BY created_at DESC LIMIT 1",
+                      (candidate_id, ActionName(action).value)).fetchone()
+    return _approval(r) if r else None
