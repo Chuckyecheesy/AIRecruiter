@@ -1,17 +1,28 @@
-"""Shared enums + Pydantic models (frozen after kickoff; changes go through lane A).
+"""Shared contract: enums + Pydantic models used by every lane.
 
-Names mirror web/lib/types.ts exactly. Enum values equal member names so they
-store as plain text in SQLite and compare equal to strings.
+SHARED FILE. Written at kickoff, then frozen. Lane A merges any later changes,
+and lane C mirrors them in web/lib/types.ts.
+
+Sections:
+  1. Enums (specs 01, 03, 04)                       — lane A
+  2. Core records (Decision, Approval, Event, ...)  — lane A
+  3. Tool I/O models (spec 02)                      — lane B (TODO at kickoff)
+  4. API request/response shapes (spec 06)          — lane C
 """
+
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any, Literal, Optional
+from enum import StrEnum
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
-class CandidateState(str, Enum):
+# ───────────────────────────── 1. Enums ─────────────────────────────
+
+
+class CandidateState(StrEnum):
     DISCOVERED = "DISCOVERED"
     RESEARCHED = "RESEARCHED"
     CONTACT_FOUND = "CONTACT_FOUND"

@@ -1,7 +1,8 @@
 """Offline-first eval harness for lane B's Claude tools (drafter, persona, classifier, evaluator, rubric).
 
     .venv/bin/python tests/evals/run_evals.py            # stub mode (no API calls)
-    .venv/bin/python tests/evals/run_evals.py --live     # LLM_MODE=real (costs ~$0.3/run)
+    .venv/bin/python tests/evals/run_evals.py --live     # real model calls via LLM_PROVIDER (anthropic ~$0.3/run;
+                                                         # gemini: set GEMINI_API_KEY, LLM_PROVIDER=gemini)
         options: --only drafter,evaluator   --repeat 3   --json out.json   --verbose
 
 Graders are deterministic (no LLM judge). A "wrapper" suite always runs offline: it feeds canned HTTP
@@ -385,7 +386,7 @@ async def run_wrapper() -> list[Result]:
 
         client = anthropic.AsyncAnthropic(api_key="sk-test", max_retries=0,
                                           http_client=anthropic.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(handler)))
-        llm = llm_mod.LLM.__new__(llm_mod.LLM)
+        llm = llm_mod.LLM.__new__(llm_mod.LLM, provider="anthropic")  # this suite fakes Anthropic HTTP
         llm.model, llm._client = "claude-sonnet-5-5", client
         try:
             await llm.structured(system="s", prompt="p", output=Evaluation)
@@ -400,11 +401,39 @@ async def run_wrapper() -> list[Result]:
 
 # ---------------------------------------------------------------- main
 
+class PacedRetryLLM:
+    """Live runs only: keep under the provider's requests-per-minute limit and retry transient /
+    rate-limited errors (Gemini free tier is 15 RPM and often returns 503 'high demand').
+    In the app, lane A's execute node owns retries; this just keeps the eval from measuring outages."""
+
+    _last = 0.0
+
+    def __init__(self, inner, rpm: int, attempts: int = 5):
+        self._inner, self._gap, self._attempts = inner, 60.0 / max(1, rpm), attempts
+        self.model = getattr(inner, "model", "?")
+
+    async def structured(self, **kw):
+        for i in range(self._attempts):
+            wait = PacedRetryLLM._last + self._gap - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            PacedRetryLLM._last = time.monotonic()
+            try:
+                return await self._inner.structured(**kw)
+            except ToolError as e:
+                if e.kind not in ("transient", "rate_limited") or i == self._attempts - 1:
+                    raise
+                delay = min(60.0, e.retry_after_s or 2.0 * 2 ** i)
+                print(f"    .. {e.kind} ({str(e)[:60]}); retry {i + 1} in {delay:.0f}s", flush=True)
+                await asyncio.sleep(delay)
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true", help="call the real model (LLM_MODE=real)")
     ap.add_argument("--only", default="", help="comma list: drafter,persona,classifier,evaluator,rubric,wrapper")
     ap.add_argument("--repeat", type=int, default=1)
+    ap.add_argument("--rpm", type=int, default=12, help="max model calls per minute (Gemini free tier: 15)")
     ap.add_argument("--json", default="")
     ap.add_argument("--verbose", "-v", action="store_true")
     a = ap.parse_args()
@@ -412,10 +441,18 @@ async def main() -> int:
     cfg = json.loads((HERE / "cases.json").read_text())
     profiles, transcript = load_fixtures()
     s = Settings(llm_mode="real" if a.live else "stub", tools_mode="mock", fail_tool=None)
+    if a.live:
+        model = s.gemini_model if s.llm_provider == "gemini" else f"{s.model_draft} / {s.model_eval}"
+        print(f"LIVE run: provider={s.llm_provider} model={model}")
     tools = build_tools(s)
     only = set(filter(None, a.only.split(",")))
     want = lambda k: not only or k in only  # noqa: E731
-    print(f"mode={'LIVE (' + s.model_draft + ')' if a.live else 'stub'}  repeat={a.repeat}")
+    if a.live:
+        for name in ("drafter", "evaluator", "rubric", "persona", "classifier"):
+            tool = getattr(tools, name)
+            if getattr(tool, "_llm", None) is not None:
+                tool._llm = PacedRetryLLM(tool._llm, a.rpm)
+    print(f"mode={'LIVE' if a.live else 'stub'}  repeat={a.repeat}" + (f"  rpm<={a.rpm}" if a.live else ""))
 
     all_results: list[Result] = []
     for rep in range(a.repeat):

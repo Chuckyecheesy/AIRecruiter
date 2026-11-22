@@ -116,6 +116,15 @@ _GENERIC_NAMES = {"Communication", "Ownership", "Learning speed", "Product sense
 _STOP = {"and", "the", "with", "for", "using", "experience", "skills", "strong", "fit", "overall", "some"}
 
 
+def _has_interview(obj: Any) -> bool:
+    """Any nested dict with transcript turns (lane A: contact_log entry of kind "interview")."""
+    if isinstance(obj, dict):
+        return bool(obj.get("turns")) or any(_has_interview(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(_has_interview(v) for v in obj)
+    return False
+
+
 def _stub(rubric: list[dict], memory: Any, threshold: int) -> Evaluation:
     """Offline scoring by keyword match, so stub mode still separates strong and weak candidates."""
     crits = rubric or [{"name": "Overall fit", "weight": 1.0}]
@@ -124,8 +133,7 @@ def _stub(rubric: list[dict], memory: Any, threshold: int) -> Evaluation:
     profile = memory.get("profile", {}) if isinstance(memory, dict) else {}
     completeness = float(profile.get("completeness", 0.5) or 0.5) if isinstance(profile, dict) else 0.5
     scores = []
-    has_interview = any(isinstance(v, dict) and v.get("turns") for v in (memory or {}).values()) \
-        if isinstance(memory, dict) else False
+    has_interview = _has_interview(memory)
     for c in crits:
         if c["name"] in _GENERIC_NAMES:  # soft skills: can't keyword-match; neutral, better with an interview
             score, evidence = (85, ["(stub) interview transcript present"]) if has_interview else (70, ["(stub) neutral"])

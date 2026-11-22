@@ -71,9 +71,10 @@ def test_untrusted_cannot_close_its_own_tag():
     assert out.count("</reply>") == 1 and out.endswith("</reply>")
 
 
-def test_memory_for_prompt_strips_raw_recursively():
-    out = memory_for_prompt({"profile": {"name": "a", "raw": {"x": 1}}, "contact_log": [1], "summary": "s"})
-    assert out == {"profile": {"name": "a"}}
+def test_memory_for_prompt_strips_raw_recursively_but_keeps_contact_log():
+    out = memory_for_prompt({"profile": {"name": "a", "raw": {"x": 1}}, "contact_log": [1], "summary": "s",
+                             "contact": {"email": "demo+a@example.com"}})
+    assert out == {"profile": {"name": "a"}, "contact_log": [1]}
 
 
 # ---------- drafter ----------
@@ -124,7 +125,7 @@ async def test_llm_schema_validation_error_maps_to_transient():
     async def parse(**kw):
         _Bounded.model_validate({"score": 105})  # what messages.parse raises client-side
 
-    llm = LLM(api_key="x", model="m")
+    llm = LLM(api_key="x", model="m", provider="anthropic")
     llm._client = types.SimpleNamespace(messages=types.SimpleNamespace(parse=parse))
     with pytest.raises(ToolError) as e:
         await llm.structured(system="s", prompt="p", output=_Bounded)
@@ -132,7 +133,7 @@ async def test_llm_schema_validation_error_maps_to_transient():
 
 
 def test_llm_client_has_short_timeout():
-    llm = LLM(api_key="x", model="m", timeout_s=12)
+    llm = LLM(api_key="x", model="m", timeout_s=12, provider="anthropic")
     assert llm._client.timeout == 12 and llm._client.max_retries == 1
 
 
@@ -150,3 +151,16 @@ def test_path_id_blocks_traversal_and_query_injection():
     assert path_id("x?limit=9999") == "x%3Flimit%3D9999"
     with pytest.raises(ToolError):
         path_id("")
+
+
+async def test_evaluator_sees_lane_a_interview_in_contact_log():
+    """Lane A's real memory shape: transcript lives in contact_log (kind=interview)."""
+    from api.contracts import CandidateMemory
+    mem = CandidateMemory(candidate_id="c1", profile=MEMORY["profile"], contact_log=[
+        {"kind": "email_out", "body": "Hi Sarah"},
+        {"kind": "email_in", "body": "Happy to chat!"},
+        {"kind": "interview", "turns": [{"role": "candidate", "text": "I measured recall at 5 and MRR"}]}])
+    llm = SeqLLM(ev(("RAG", 0.6, 90, ["measured recall at 5 and MRR"]), ("TypeScript", 0.4, 80, ["TypeScript"])))
+    out = await Evaluator(llm).evaluate({"title": "x", "rubric": RUBRIC}, mem, 75)
+    assert "recall at 5" in llm.prompts[0] and "Happy to chat" in llm.prompts[0]
+    assert out.criteria[0].score == 90  # quote from the interview counts as grounded

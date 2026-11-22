@@ -195,7 +195,7 @@ def app_with_fake_repo(monkeypatch):
     monkeypatch.setitem(sys.modules, "api.db.repo", repo)
 
     app = FastAPI()
-    app.include_router(webhooks.router)
+    app.include_router(webhooks.router, prefix="/api")
     return TestClient(app), emitted
 
 
@@ -324,7 +324,7 @@ def test_webhook_route_emits_into_real_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(webhooks, "get_tools", lambda: tools)
     monkeypatch.setattr(webhooks, "_seen_conversations", OrderedDict())
     app = FastAPI()
-    app.include_router(webhooks.router)
+    app.include_router(webhooks.router, prefix="/api")
 
     body = webhook_body(conv_id="conv_real", candidate_id=cand_id, job_id=job_id)
     r = TestClient(app).post("/api/webhooks/elevenlabs", content=body, headers={"ElevenLabs-Signature": sign(body)})

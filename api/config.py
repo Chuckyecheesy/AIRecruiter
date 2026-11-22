@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     model_draft: str = "claude-sonnet-5-5"
     model_eval: str = "claude-sonnet-5-5"
     llm_mode: Literal["real", "stub"] = "real"
+    llm_provider: Literal["anthropic", "gemini"] = "anthropic"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.8-flash"  # used for every role when LLM_PROVIDER=gemini
     llm_timeout_s: float = 45.0
     # Used in outreach sign-offs; never invented by the model.
     company_name: str | None = None

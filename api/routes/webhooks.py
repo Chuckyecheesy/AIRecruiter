@@ -22,7 +22,7 @@ from api.tools import get_tools
 from api.tools.elevenlabs import parse_webhook
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+router = APIRouter(prefix="/webhooks", tags=["webhooks"])  # main.py mounts it under /api
 
 _SEEN_MAX = 1000
 _seen_conversations: OrderedDict[str, None] = OrderedDict()  # in-process dedupe (retries / replays)
