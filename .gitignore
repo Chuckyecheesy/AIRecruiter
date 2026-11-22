@@ -48,3 +48,6 @@ test-results/
 # Claude Code local settings / graphify output
 .claude/settings.local.json
 graphify-out/
+
+# Local per-person Claude agent notes (person-a)
+.claude-agent/person-a/
