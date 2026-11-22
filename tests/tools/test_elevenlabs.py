@@ -290,3 +290,48 @@ def test_webhook_route_malformed_and_oversized(app_with_fake_repo, monkeypatch):
     monkeypatch.setattr(webhooks, "get_settings", lambda: Settings(_env_file=None, webhook_max_bytes=100))
     big = b"x" * 500
     assert client.post("/api/webhooks/elevenlabs", content=big).status_code == 413
+
+
+def test_transcript_strips_voice_tags_and_blank_turns():
+    from api.tools.elevenlabs import _to_turns
+    turns = _to_turns([
+        {"role": "agent", "message": "Great, let's dive in. [friendly] Walk me through a RAG system.", "time_in_call_secs": 1},
+        {"role": "agent", "message": "  \n", "time_in_call_secs": 2},
+        {"role": "user", "message": "I used [brackets] in my answer", "time_in_call_secs": 3},
+    ])
+    assert [t.text for t in turns] == ["Great, let's dive in. Walk me through a RAG system.",
+                                       "I used [brackets] in my answer"]  # candidate text untouched
+
+
+# ---------- integration with lane A's real repo (catches signature drift) ----------
+
+def test_webhook_route_emits_into_real_repo(tmp_path, monkeypatch):
+    from collections import OrderedDict
+
+    from api.config import Settings
+    from api.db import repo
+    from api.routes import webhooks
+    from api.tools import build_tools
+
+    repo.init_db(tmp_path / "recruiter.db")
+    job_id = repo.create_job("AI Engineer", {"title": "AI Engineer"})
+    from api.contracts import JobState
+    repo.set_job_state(job_id, JobState.ACTIVE)  # the dispatcher only sees ACTIVE jobs' events
+    cand_id = repo.create_candidate(job_id, "pl_001", "Sarah Chen")
+
+    tools = build_tools(Settings(_env_file=None, llm_mode="stub", tools_mode="mock"))
+    tools.elevenlabs = RealElevenLabsClient("xi", "agent_x", SECRET)
+    monkeypatch.setattr(webhooks, "get_tools", lambda: tools)
+    monkeypatch.setattr(webhooks, "_seen_conversations", OrderedDict())
+    app = FastAPI()
+    app.include_router(webhooks.router)
+
+    body = webhook_body(conv_id="conv_real", candidate_id=cand_id, job_id=job_id)
+    r = TestClient(app).post("/api/webhooks/elevenlabs", content=body, headers={"ElevenLabs-Signature": sign(body)})
+    assert r.status_code == 200 and r.json() == {"ok": True}, r.text
+
+    events = [e for e in repo.fetch_due_events(limit=50, job_id=job_id) if e.type.value == "InterviewDone"]
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.candidate_id == cand_id and ev.payload["conversation_id"] == "conv_real"
+    assert ev.payload["transcript"]["turns"][0]["role"] == "agent"

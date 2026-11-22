@@ -21,6 +21,7 @@ import hmac
 import inspect
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -92,13 +93,22 @@ def build_dynamic_variables(
 
 # ---------- parsing ----------
 
+# Expressive-voice tags the agent emits, e.g. "[friendly]", "[warm]" (not spoken content).
+_VOICE_TAG = re.compile(r"\[[a-z][a-z ]{0,20}\]\s*")
+
+
 def _to_turns(items: list[dict]) -> list[Turn]:
-    return [
-        Turn(role="agent" if t.get("role") == "agent" else "candidate",
-             text=t.get("message") or "", t_s=t.get("time_in_call_secs"))
-        for t in items or []
-        if isinstance(t, dict) and t.get("message")
-    ]
+    turns = []
+    for t in items or []:
+        if not isinstance(t, dict):
+            continue
+        role = "agent" if t.get("role") == "agent" else "candidate"
+        text = (t.get("message") or "").strip()
+        if role == "agent":
+            text = _VOICE_TAG.sub("", text).strip()
+        if text:
+            turns.append(Turn(role=role, text=text, t_s=t.get("time_in_call_secs")))
+    return turns
 
 
 def _start_time(data: dict) -> float | None:

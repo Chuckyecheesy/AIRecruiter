@@ -11,7 +11,7 @@ Mode = Literal["mock", "real", "off"]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     # Claude
     anthropic_api_key: str | None = None
