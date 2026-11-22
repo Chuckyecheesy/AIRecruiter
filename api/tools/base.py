@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from api.tools.models import (
@@ -66,9 +67,11 @@ class CandidatePersona(Protocol):
 @runtime_checkable
 class ElevenLabsClient(Protocol):
     async def create_interview(
-        self, candidate_id: str, questions: list[str], context: str
+        self, candidate_id: str, questions: list[str], context: str,
+        *, job_id: str | None = None, candidate_name: str | None = None,
     ) -> InterviewSession: ...
     async def get_transcript(self, conversation_id: str) -> InterviewTranscript | None: ...
+    async def find_conversation(self, candidate_id: str, since: datetime) -> str | None: ...
     def verify_webhook(self, headers: dict, body: bytes) -> bool: ...
 
 

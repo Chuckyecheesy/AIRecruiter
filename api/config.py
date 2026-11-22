@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     elevenlabs_agent_id: str | None = None
     elevenlabs_webhook_secret: str | None = None
     elevenlabs_poll: bool = False
+    elevenlabs_base_url: str = "https://api.elevenlabs.io"
     mock_interview_delay_s: float = 15.0
 
     # Langfuse

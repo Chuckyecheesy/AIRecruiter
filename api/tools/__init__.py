@@ -17,7 +17,7 @@ from api.tools.base import (
 )
 from api.tools.browser import DisabledBrowserTool
 from api.tools.drafter import Drafter
-from api.tools.elevenlabs import MockElevenLabsClient
+from api.tools.elevenlabs import MockElevenLabsClient, RealElevenLabsClient
 from api.tools.email_sim import EmailSimulator
 from api.tools.evaluator import Evaluator
 from api.tools.fiber import DemoInboxFiber, MockFiberClient, RealFiberClient
@@ -68,9 +68,14 @@ def build_tools(s: Settings) -> Tools:
     # Browser (stretch)
     browser: Any = DisabledBrowserTool(); status["browser"] = "off"
 
-    # ElevenLabs (real client lands in the 1:40-2:50 block)
-    elevenlabs: Any = MockElevenLabsClient(s.public_base_url, s.mock_interview_delay_s)
-    status["elevenlabs"] = "mock"
+    # ElevenLabs
+    if s.mode_for("elevenlabs") == "real" and s.elevenlabs_api_key and s.elevenlabs_agent_id:
+        elevenlabs: Any = RealElevenLabsClient(s.elevenlabs_api_key, s.elevenlabs_agent_id,
+                                               s.elevenlabs_webhook_secret, s.elevenlabs_base_url)
+        status["elevenlabs"] = "real" + (" (poll)" if s.elevenlabs_poll else " (webhook)")
+    else:
+        elevenlabs = MockElevenLabsClient(s.public_base_url, s.mock_interview_delay_s)
+        status["elevenlabs"] = "mock"
 
     email: Any = EmailSimulator(s.allow_real_email, s.email_allowlist_set); status["email"] = "simulated"
 
