@@ -10,29 +10,29 @@
 ---
 
 ## 0:00-0:20 Kickoff (with everyone)
-- [ ] Add the tool I/O models from spec 02 to `api/contracts.py`: `SearchCriteria`, `PloidCandidate`, `EnrichedProfile`, `ContactInfo`, `BrowserFindings`, `SendReceipt`, `InterviewSession`, `InterviewTranscript`, `Draft`, `Evaluation`, `Rubric`, `Disposition`
-- [ ] `config.py`: Pydantic settings with every env var from spec 07 (`TOOLS_MODE` and per-tool overrides, model IDs, `DEMO_INBOX`, `PERSONA_DELAY_S`, ...)
-- [ ] `.env.example` committed, `.env` git-ignored
+- [x] Add the tool I/O models from spec 02 (in `api/tools/models.py`; `contracts.py` re-exports them): `SearchCriteria`, `PloidCandidate`, `EnrichedProfile`, `ContactInfo`, `BrowserFindings`, `SendReceipt`, `InterviewSession`, `InterviewTranscript`, `Draft`, `Evaluation`, `Rubric`, `Disposition`
+- [x] `config.py`: Pydantic settings with every env var from spec 07 (`TOOLS_MODE` and per-tool overrides, model IDs, `DEMO_INBOX`, `PERSONA_DELAY_S`, ...)
+- [x] `.env.example` committed, `.env` git-ignored
 - [ ] Merge to `main`
 
 ## 0:20-1:10 Mocks + Claude tools → checkpoint: core loop reaches `OUTREACH_DRAFTED` (with A)
-- [ ] `tools/base.py`: `ToolError(kind, retry_after_s)`, all `Protocol`s, `get_tools()` that picks mock/real per env var
-- [ ] `FAIL_TOOL=<name>` demo flag: the wrapper makes that tool raise `transient` every time (for the resilience demo)
-- [ ] `fixtures/ploid_candidates.json`: ~8 candidates, **including 1 duplicate and 1 thin profile** (completeness < 0.6)
-- [ ] `MockPloidClient.search` / `.enrich`
-- [ ] `fixtures/fiber_contacts.json` + `MockFiberClient` (one candidate raises `not_found`)
-- [ ] Demo-safety rewrite: every contact email becomes `DEMO_INBOX+{candidate_id}`
-- [ ] `Drafter.outreach(job, memory, feedback)` and `Drafter.reply(...)` (Claude). Feedback must make the redraft visibly different
-- [ ] `RubricGenerator.generate(form)`: 4-6 weighted criteria + interview themes
-- [ ] `tools_status()` returns `{tool: "mock"|"real"|"off"}` for C's `/health`
-- [ ] `tests/tools/`: each mock returns valid models
+- [x] `tools/base.py`: `ToolError(kind, retry_after_s)`, all `Protocol`s, `get_tools()` that picks mock/real per env var
+- [x] `FAIL_TOOL=<name>` demo flag: the wrapper makes that tool raise `transient` every time (for the resilience demo)
+- [x] `fixtures/ploid_candidates.json`: ~8 candidates, **including 1 duplicate and 1 thin profile** (completeness < 0.6)
+- [x] `MockPloidClient.search` / `.enrich`
+- [x] `fixtures/fiber_contacts.json` + `MockFiberClient` (one candidate raises `not_found`)
+- [x] Demo-safety rewrite: every contact email becomes `DEMO_INBOX+{candidate_id}`
+- [x] `Drafter.outreach(job, memory, feedback)` and `Drafter.reply(...)` (Claude). Feedback must make the redraft visibly different
+- [x] `RubricGenerator.generate(form)`: 4-6 weighted criteria + interview themes
+- [x] `tools_status()` returns `{tool: "mock"|"real"|"off"}` for C's `/health`
+- [x] `tests/tools/`: each mock returns valid models
 - [ ] **Merge by ~0:40** so A can swap their fakes for your mocks
 
 ## 1:10-1:40 Outreach tools → checkpoint: approve → `CONTACTED` → `INTERESTED`
-- [ ] `EmailSimulator.send` returns a fake `SendReceipt`. **No SMTP ever**
-- [ ] Hard guard: refuse a real send unless `ALLOW_REAL_EMAIL=true` **and** the recipient is on `EMAIL_ALLOWLIST`
-- [ ] `CandidatePersona.reply(profile, thread, disposition)` for `interested` / `not_interested` / `asks_question`
-- [ ] Helper `pick_disposition()` with 60/20/10/10 weights (A calls it when there is no pinned disposition)
+- [x] `EmailSimulator.send` returns a fake `SendReceipt`. **No SMTP ever**
+- [x] Hard guard: refuse a real send unless `ALLOW_REAL_EMAIL=true` **and** the recipient is on `EMAIL_ALLOWLIST`
+- [x] `CandidatePersona.reply(profile, thread, disposition)` for `interested` / `not_interested` / `asks_question`
+- [x] Helper `pick_disposition()` with 60/20/10/10 weights (A calls it when there is no pinned disposition)
 - [ ] **Sync 1:40**
 
 ## 1:40-2:50 Voice + evaluation → checkpoint: real voice interview ends in `SHORTLISTED`
@@ -42,8 +42,8 @@
 - [ ] `verify_webhook(headers, body)` (signature check)
 - [ ] `routes/webhooks.py`: `POST /api/webhooks/elevenlabs` → verify → call A's `repo.emit_event(InterviewDone, transcript)`
 - [ ] Poller fallback (`ELEVENLABS_POLL=true`, every 10s) as a function A or C can start at startup
-- [ ] `MockElevenLabsClient`: scripted transcript after 15s (`fixtures/transcript.json`)
-- [ ] `Evaluator.evaluate(job, memory)` → `Evaluation` with per-criterion evidence quoted from memory
+- [x] `MockElevenLabsClient`: scripted transcript after 15s (`fixtures/transcript.json`)
+- [x] `Evaluator.evaluate(job, memory)` → `Evaluation` with per-criterion evidence quoted from memory
 - [ ] Ask C to add your webhook router to `main.py`
 - [ ] **Sync 2:50:** a team member does a live voice interview and it ends in `SHORTLISTED`
 
