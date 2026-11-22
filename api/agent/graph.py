@@ -427,6 +427,8 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
 
     async def permission_check(st: AgentState) -> dict:
         d, cid = st["decision"], st["candidate_id"]
+        if (refusal := _refuse_duplicate_send(st)) is not None:
+            return refusal  # don't even ask the CEO to approve a send that would be refused
         verdict = check_permission(d.action, st["job"].get("permission_policy"))
         if verdict == Verdict.allow:
             return {"route": "execute"}
@@ -458,6 +460,8 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
         prior = repo.get_tool_call(key)
         if prior and prior["status"] == "ok":  # event replayed after a crash: don't re-run
             return {"result": prior["output"], "route": "update_state"}
+        if (refusal := _refuse_duplicate_send(st)) is not None:  # approvals skip permission_check
+            return refusal
         tools = deps.tools
         if tools is None:
             from api.tools import get_tools
@@ -598,6 +602,31 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
     g.add_edge("update_state", END)
     g.add_edge("escalate", END)
     return g.compile(checkpointer=checkpointer)
+
+
+def _duplicate_send_reason(mem: CandidateMemory, d: Decision) -> Optional[str]:
+    """Did we already contact this person? (specs/04-data-model.md rule 3)"""
+    sent = [e for e in mem.contact_log if e.get("kind") == "email_out"]
+    if d.action == A.send_outreach and sent:
+        return f"already contacted ({len(sent)} email sent, last {sent[-1].get('ts')})"
+    if d.action == A.send_followup and any(
+            e.get("subject") == d.args.get("subject") and e.get("body") == d.args.get("body")
+            for e in sent):
+        return "an identical message was already sent"
+    return None
+
+
+def _refuse_duplicate_send(st: AgentState) -> Optional[dict]:
+    """Refuse a duplicate send: nothing is sent, the refusal is logged, the run ends."""
+    d, cid = st["decision"], st.get("candidate_id")
+    if cid is None or d.action not in (A.send_outreach, A.send_followup):
+        return None
+    reason = _duplicate_send_reason(repo.get_memory(cid), d)  # fresh: a send may have landed since observe
+    if reason is None:
+        return None
+    repo.append_decision(cid, {"ts": repo.now_iso(), "action": d.action.value,
+                               "reasoning": d.reasoning, "outcome": f"refused: {reason}"})
+    return {"route": "end"}
 
 
 def _traced_node(name: str, fn, trace: tracing.RunTrace):
