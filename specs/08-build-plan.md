@@ -51,6 +51,8 @@ AIRecruiter/
 ```
 
 ## Parallelization (if 2+ people)
+> **3-person split:** see [team/README.md](team/README.md) for file ownership, sync points, and per-person checklists. That split replaces the 2-person version below.
+
 - **Person A (backend/agent):** `04` → `01` → `05` → `03` → tools.
 - **Person B (frontend/demo):** `06` UI against the API contract using a stub server first, then wire up SSE; also own ElevenLabs agent setup and the demo script.
 - The contract is the types in `06` and the event names in `04`. Agree on those in the first 20 minutes.
