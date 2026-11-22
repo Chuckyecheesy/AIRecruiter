@@ -23,7 +23,7 @@
 - [ ] `repo.py` real implementations (ULIDs, ISO timestamps, JSON columns validated with Pydantic)
 - [ ] Per-candidate lock (`locked_by`, `locked_at`)
 - [ ] Dispatcher: 1s poll loop, respects `not_before`, serial per candidate, `Semaphore(MAX_CONCURRENT_RUNS)`, skips `PAUSED` jobs
-- [ ] Crash recovery: reset `processing` rows older than 2 min to `pending` on startup
+- [x] Crash recovery: reset `processing` rows older than 2 min to `pending` on startup
 - [ ] LangGraph `StateGraph`: `observe → decide → permission_check → execute → update_state`, plus `escalate`
 - [ ] `SqliteSaver` on `data/checkpoints.db`, thread id `{job_id}:{candidate_id}` / `{job_id}:job`
 - [ ] `prompts.py`: decide prompt contract from spec 05, structured output `{action, args, reasoning}`
