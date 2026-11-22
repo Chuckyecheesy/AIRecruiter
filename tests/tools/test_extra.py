@@ -505,7 +505,7 @@ class _FakeMessages:
 
 
 def fake_llm(behavior) -> LLM:
-    llm = LLM("sk-test-not-real", "claude-test")
+    llm = LLM("sk-test-not-real", "claude-test", provider="anthropic")
     llm._client = types.SimpleNamespace(messages=_FakeMessages(behavior))
     return llm
 
@@ -871,7 +871,7 @@ def _app(monkeypatch, elevenlabs):
     tools.elevenlabs = elevenlabs
     monkeypatch.setattr(webhooks, "get_tools", lambda: tools)
     app = FastAPI()
-    app.include_router(webhooks.router)
+    app.include_router(webhooks.router, prefix="/api")
     return TestClient(app, raise_server_exceptions=False)
 
 

@@ -52,7 +52,9 @@ def build_tools(s: Settings) -> Tools:
     status: dict[str, str] = {}
 
     def llm(model: str) -> LLM | None:
-        return LLM(s.anthropic_api_key, model, timeout_s=s.llm_timeout_s) if s.llm_enabled else None
+        if not s.llm_enabled:
+            return None
+        return LLM(s.anthropic_api_key, model, timeout_s=s.llm_timeout_s, provider=s.llm_provider, settings=s)
 
     def fallback(tool: str, missing: list[str]) -> str:
         """A tool set to `real` without credentials falls back to mock, loudly."""
@@ -61,7 +63,8 @@ def build_tools(s: Settings) -> Tools:
         log.warning("%s: mode is real but %s not set; using MOCK", tool, " / ".join(missing))
         return f"mock (real requested; missing {', '.join(missing)})"
 
-    llm_status = "real" if s.llm_enabled else "stub"
+    llm_status = (f"real ({s.llm_provider}: {s.gemini_model})" if s.llm_provider == "gemini" else "real") \
+        if s.llm_enabled else "stub"
 
     # Ploid
     if s.mode_for("ploid") == "real" and s.ploid_api_key and s.ploid_base_url:
