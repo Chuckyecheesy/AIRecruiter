@@ -250,6 +250,9 @@ def get_candidate(conn: sqlite3.Connection, candidate_id: str) -> CandidateDetai
 
 
 def _interview(r: sqlite3.Row) -> InterviewOut:
+    tr = _j(r["transcript"], [])
+    if isinstance(tr, dict):  # lane A stores the whole InterviewTranscript; the UI wants its turns
+        tr = tr.get("turns") or []
     return InterviewOut(
         id=r["id"],
         conversation_id=r["conversation_id"],
@@ -257,7 +260,7 @@ def _interview(r: sqlite3.Row) -> InterviewOut:
         expires_at=r["expires_at"],
         questions=_j(r["questions"], []),
         status=r["status"],
-        transcript=_j(r["transcript"], []),
+        transcript=tr,
         duration_s=r["duration_s"],
         created_at=r["created_at"],
         completed_at=r["completed_at"],
@@ -268,7 +271,9 @@ def _evaluation(r: sqlite3.Row) -> EvaluationOut:
     return EvaluationOut(
         id=r["id"],
         score=r["score"],
-        criteria=_j(r["criteria"], []),
+        criteria=[{**c, "evidence": "; ".join(map(str, c["evidence"]))}
+                  if isinstance(c, dict) and isinstance(c.get("evidence"), list) else c
+                  for c in _j(r["criteria"], [])],
         recommendation=r["recommendation"],
         summary=r["summary"] or "",
         created_at=r["created_at"],

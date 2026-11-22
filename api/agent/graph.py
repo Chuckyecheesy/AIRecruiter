@@ -8,6 +8,7 @@ Only code applies transitions; the LLM only picks from `valid_actions`.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import time
@@ -125,7 +126,9 @@ async def _draft(tools, st) -> dict:
     fb = st["decision"].args.get("feedback") or st["event"].payload.get("feedback")
     prev = _latest_draft(st["memory"]) if fb else None
     previous = Draft(subject=prev.get("subject"), body=prev.get("body") or "") if prev and prev.get("body") else None
-    d = await tools.drafter.outreach(SimpleNamespace(**st["job"]), st["memory"], fb, previous=previous)
+    kw = {"previous": previous} if previous is not None and "previous" in inspect.signature(
+        tools.drafter.outreach).parameters else {}
+    d = await tools.drafter.outreach(SimpleNamespace(**st["job"]), st["memory"], fb, **kw)
     return {"draft": d.model_dump(mode="json")}
 
 
@@ -385,6 +388,9 @@ def _contextual_actions(cand: dict, job: dict, ev: Event, valid: list[A]) -> tup
     """Narrow the state table by context. Returns (actions, escalation) where escalation is
     {"reason", "extra"} when the run must hand over to a human instead of deciding."""
     state, cid = S(cand["state"]), cand["id"]
+    if state == S.INTERVIEWING and ev.type not in (E.InterviewDone, E.HumanResolved):
+        # Spec 01: wait until the transcript exists (webhook or poller emits InterviewDone with it).
+        valid = [a for a in valid if a not in (A.process_interview,)]
     if ev.type == E.Tick and state == S.CONTACTED:
         drop = {"followup": A.mark_stale, "stale": A.send_followup}.get(ev.payload.get("due"))
         valid = [a for a in valid if a != drop]

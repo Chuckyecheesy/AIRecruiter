@@ -87,9 +87,19 @@ async def start_dispatcher() -> None:
     res = _start()
     if hasattr(res, "__await__"):
         await res
+    try:  # lane B: emits InterviewDone when a transcript is ready (mock mode / ELEVENLABS_POLL)
+        from api.tools.interview_poller import start_interview_poller
+        start_interview_poller()
+    except Exception:
+        log.exception("interview poller failed to start")
 
 
 async def stop_dispatcher() -> None:
+    try:
+        from api.tools.interview_poller import stop_interview_poller
+        await stop_interview_poller()
+    except Exception:
+        log.exception("interview poller failed to stop")
     try:
         from api.agent.dispatcher import stop_dispatcher as _stop  # type: ignore
     except ImportError:
