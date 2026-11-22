@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -434,3 +435,55 @@ def release_lock(candidate_id: str, owner: str) -> None:
     with get_conn() as c:
         c.execute("UPDATE candidates SET locked_by=NULL, locked_at=NULL WHERE id=? AND locked_by=?",
                   (candidate_id, owner))
+
+
+class LockBusy(RuntimeError):
+    """The candidate lock is held by another owner."""
+
+
+# Re-entrancy depth per (candidate, owner) within this process, so a nested
+# `candidate_lock` by the same owner does not release the outer lock early.
+_held: dict[tuple[str, str], int] = {}
+_held_guard = threading.Lock()
+
+
+@contextmanager
+def candidate_lock(candidate_id: str, owner: str, stale_after_s: int = 120) -> Iterator[None]:
+    """Hold the candidate lock for the block; raise LockBusy if someone else has it."""
+    key = (candidate_id, owner)
+    with _held_guard:
+        nested = key in _held
+        if nested:
+            _held[key] += 1
+        elif acquire_lock(candidate_id, owner, stale_after_s):
+            _held[key] = 1
+        else:
+            raise LockBusy(f"candidate {candidate_id} is locked by another owner")
+    try:
+        yield
+    finally:
+        with _held_guard:
+            _held[key] -= 1
+            if _held[key] == 0:
+                del _held[key]
+                release_lock(candidate_id, owner)
+
+
+def refresh_lock(candidate_id: str, owner: str) -> bool:
+    """Heartbeat: bump locked_at if `owner` still holds the lock."""
+    with get_conn() as c:
+        cur = c.execute("UPDATE candidates SET locked_at=? WHERE id=? AND locked_by=?",
+                        (now_iso(), candidate_id, owner))
+        return cur.rowcount == 1
+
+
+def release_stale_locks(stale_after_s: int = 120) -> int:
+    """Startup crash recovery: clear locks older than the threshold (or with no timestamp)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_after_s)
+    cleared = 0
+    with get_conn() as c:
+        for r in c.execute("SELECT id, locked_at FROM candidates WHERE locked_by IS NOT NULL").fetchall():
+            if r["locked_at"] is None or _parse_ts(r["locked_at"]) <= cutoff:
+                c.execute("UPDATE candidates SET locked_by=NULL, locked_at=NULL WHERE id=?", (r["id"],))
+                cleared += 1
+    return cleared
