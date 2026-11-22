@@ -65,7 +65,7 @@
 - [x] No Langfuse keys → no-op tracing, `trace_url` null, app still runs
 - [x] Duplicate guard in `search_candidates`: `(job_id, ploid_id)` or `name_key` + shared URL → skip, add a memory note, no `CandidateFound`
 - [x] `contact_log` check refuses a duplicate `send_outreach`
-- [ ] **Test:** restart the server mid-run and confirm pending events resume with no state lost
+- [x] **Test:** restart the server mid-run and confirm pending events resume with no state lost
 - [ ] **Sync 3:40**
 
 ## 3:40-4:00 Demo prep

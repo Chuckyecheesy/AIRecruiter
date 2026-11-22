@@ -391,8 +391,11 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
         if ev.type == E.ApprovalGranted:
             # Execute exactly what the CEO approved; the LLM is not consulted.
             ap = repo.get_approval(ev.payload.get("approval_id") or "")
-            if (ap is None or ap.status != "approved" or ap.candidate_id != cid
-                    or ap.action not in out["valid_actions"]):
+            if ap is not None and ap.status == "executed" and _send_result_recorded(ev, ap):
+                ap_ok = True  # crashed after the send, before the state update: finish, don't re-send
+            else:
+                ap_ok = ap is not None and ap.status == "approved"
+            if (not ap_ok or ap.candidate_id != cid or ap.action not in out["valid_actions"]):
                 out["route"] = "end"  # replay, rejected, already executed, or no longer applicable
             else:
                 out.update(approval=ap, route="execute", decision=Decision(
@@ -602,6 +605,12 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
     g.add_edge("update_state", END)
     g.add_edge("escalate", END)
     return g.compile(checkpointer=checkpointer)
+
+
+def _send_result_recorded(ev: Event, ap: Any) -> bool:
+    """Did this event already run the approved action successfully (tool result on record)?"""
+    prior = repo.get_tool_call(f"{ev.id}:{ap.action.value}:{ap.candidate_id}")
+    return bool(prior and prior["status"] == "ok")
 
 
 def _duplicate_send_reason(mem: CandidateMemory, d: Decision) -> Optional[str]:
