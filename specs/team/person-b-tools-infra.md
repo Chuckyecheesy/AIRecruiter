@@ -37,11 +37,11 @@
 
 ## 1:40-2:50 Voice + evaluation → checkpoint: real voice interview ends in `SHORTLISTED`
 - [ ] Set up the ElevenLabs Conversational AI agent (voice, base prompt), record `ELEVENLABS_AGENT_ID`
-- [ ] `ElevenLabsClient.create_interview(candidate_id, questions, context)` returns a join URL (rubric questions via dynamic variables or per-session overrides)
-- [ ] `get_transcript(conversation_id)`
-- [ ] `verify_webhook(headers, body)` (signature check)
-- [ ] `routes/webhooks.py`: `POST /api/webhooks/elevenlabs` → verify → call A's `repo.emit_event(InterviewDone, transcript)`
-- [ ] Poller fallback (`ELEVENLABS_POLL=true`, every 10s) as a function A or C can start at startup
+- [x] `ElevenLabsClient.create_interview(candidate_id, questions, context)` returns a join URL (rubric questions via dynamic variables or per-session overrides)
+- [x] `get_transcript(conversation_id)`
+- [x] `verify_webhook(headers, body)` (signature check)
+- [x] `routes/webhooks.py`: `POST /api/webhooks/elevenlabs` → verify → call A's `repo.emit_event(InterviewDone, transcript)`
+- [x] Poller fallback (`ELEVENLABS_POLL=true`, every 10s) as a function A or C can start at startup
 - [x] `MockElevenLabsClient`: scripted transcript after 15s (`fixtures/transcript.json`)
 - [x] `Evaluator.evaluate(job, memory)` → `Evaluation` with per-criterion evidence quoted from memory
 - [ ] Ask C to add your webhook router to `main.py`
