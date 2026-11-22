@@ -409,9 +409,7 @@ export const NeedsHumanCard: FC<{ args: { candidateId: string; error: string; tr
           <a href={args.traceUrl} target="_blank" rel="noreferrer" className="text-sm text-agent underline underline-offset-2">
             Open trace in Langfuse
           </a>
-        ) : (
-          <span className="text-sm text-quiet">No trace (Langfuse not configured)</span>
-        )}
+        ) : null}
         {stillStuck ? (
           <>
             <Btn tone="primary" disabled={busy} onClick={() => act(() => api.resumeCandidate(args.candidateId))}>

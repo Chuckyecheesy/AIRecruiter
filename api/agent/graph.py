@@ -412,6 +412,9 @@ def _contextual_actions(cand: dict, job: dict, ev: Event, valid: list[A]) -> tup
     """Narrow the state table by context. Returns (actions, escalation) where escalation is
     {"reason", "extra"} when the run must hand over to a human instead of deciding."""
     state, cid = S(cand["state"]), cand["id"]
+    from api.config import get_settings
+    if get_settings().mode_for("browser") != "real":  # browser tool off: never offer it
+        valid = [a for a in valid if a != A.browser_research]
     if state == S.INTERVIEWING and ev.type not in (E.InterviewDone, E.HumanResolved):
         # Spec 01: wait until the transcript exists (webhook or poller emits InterviewDone with it).
         valid = [a for a in valid if a not in (A.process_interview,)]
