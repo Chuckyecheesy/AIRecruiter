@@ -32,7 +32,7 @@
 - [x] `JobCreated` → `search_candidates` → insert `DISCOVERED` up to `max_candidates` → emit `CandidateFound` per candidate
 - [x] `execute` calls `get_tools()` adapters and writes a `tool_calls` row with `idempotency_key`
 - [x] Rolling `memory.summary` and `decisions` updates in `update_state`
-- [ ] **Sync 1:10:** run a mock job and show all candidates in `OUTREACH_DRAFTED`
+- [x] **Sync 1:10:** run a mock job and show all candidates in `OUTREACH_DRAFTED`
 
 ## 1:10-1:40 Permission layer → checkpoint: approve → `CONTACTED` → `INTERESTED`
 - [ ] `permissions.py`: capability matrix, per-job policy, `auto_approve` / `auto_approve_actions`

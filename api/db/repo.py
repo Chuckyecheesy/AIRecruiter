@@ -656,3 +656,11 @@ def finish_run(run_id: str, status: str, chosen_action: Optional[str] = None,
         c.execute("UPDATE agent_runs SET status=?, chosen_action=?, error=?, trace_url=?,"
                   " langfuse_trace_id=?, ended_at=? WHERE id=?",
                   (status, chosen_action, error, trace_url, trace_id, now_iso(), run_id))
+
+
+def get_pending_approval(candidate_id: str, action: ActionName) -> Optional[Approval]:
+    with get_conn() as c:
+        r = c.execute("SELECT * FROM approvals WHERE candidate_id=? AND action=? AND status='pending'"
+                      " ORDER BY created_at DESC LIMIT 1",
+                      (candidate_id, ActionName(action).value)).fetchone()
+    return _approval(r) if r else None

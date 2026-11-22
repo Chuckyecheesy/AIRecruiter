@@ -366,3 +366,48 @@ async def test_run_refuses_a_candidate_locked_by_someone_else(db, job):
                               llm=scripted_llm(A.enrich_candidate))
     assert repo.get_candidate(cid)["state"] == "DISCOVERED"
     assert repo.get_candidate(cid)["locked_by"] == "other-worker"
+
+
+# ---------- restricted actions park as one pending approval, with no wake-up loop ----------
+
+async def _drafted_candidate(job):
+    cid = repo.create_candidate(job, "p1", "Ada", state=S.OUTREACH_DRAFTED)
+    return cid
+
+
+def _approvals(cid):
+    with repo.get_conn() as c:
+        return c.execute("SELECT * FROM approvals WHERE candidate_id=?", (cid,)).fetchall()
+
+
+async def test_restricted_action_creates_one_pending_approval_and_stops(db, job):
+    cid = await _drafted_candidate(job)
+    await graph.run_event(_event(job, E.OutreachDrafted, cid), tools=tools_with(FakePloid()),
+                          llm=scripted_llm(A.send_outreach))
+    assert [a["status"] for a in _approvals(cid)] == ["pending"]
+    assert repo.get_candidate(cid)["state"] == "OUTREACH_DRAFTED"
+    assert len([e for e in _events(job) if e["type"] == "ApprovalRequested"]) == 1
+
+
+async def test_approval_requested_event_does_not_wake_the_agent(db, job):
+    cid = await _drafted_candidate(job)
+    llm = scripted_llm(A.send_outreach)
+    await graph.run_event(_event(job, E.ApprovalRequested, cid), tools=tools_with(FakePloid()), llm=llm)
+    assert llm.calls == [] and _approvals(cid) == []
+
+
+async def test_same_pending_approval_is_not_duplicated(db, job):
+    cid = await _drafted_candidate(job)
+    for _ in range(3):
+        await graph.run_event(_event(job, E.OutreachDrafted, cid), tools=tools_with(FakePloid()),
+                              llm=scripted_llm(A.send_outreach))
+    assert len(_approvals(cid)) == 1
+    assert len([e for e in _events(job) if e["type"] == "ApprovalRequested"]) == 1
+
+
+@pytest.mark.parametrize("etype", [E.Escalated, E.ToolFailed])
+async def test_notification_events_do_not_wake_the_agent(db, job, etype):
+    cid = repo.create_candidate(job, "p1", "Ada")
+    llm = scripted_llm(A.enrich_candidate)
+    await graph.run_event(_event(job, etype, cid), tools=tools_with(FakePloid()), llm=llm)
+    assert llm.calls == []

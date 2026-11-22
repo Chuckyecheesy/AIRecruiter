@@ -39,6 +39,11 @@ _SERDE = JsonPlusSerializer(allowed_msgpack_modules=[
     ("api.contracts", n) for n in ("Event", "EventType", "CandidateMemory", "ActionName", "Decision")])
 
 
+# Emitted for the dashboard/log only. Waking the agent on them would loop
+# (e.g. ApprovalRequested -> decide send_outreach -> ApprovalRequested ...).
+NOTIFICATION_EVENTS = frozenset({E.ApprovalRequested, E.Escalated, E.ToolFailed})
+
+
 class AgentState(TypedDict, total=False):
     job_id: str
     candidate_id: Optional[str]
@@ -157,6 +162,8 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         ev = st["event"]
         job = repo.get_job(st["job_id"])
         out: dict = {"job": job}
+        if ev.type in NOTIFICATION_EVENTS:
+            return {**out, "route": "end"}
         cid = st.get("candidate_id")
         if cid is None:
             out["valid_actions"] = job_valid_actions(job) if ev.type == E.JobCreated else []
@@ -201,6 +208,8 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
             return {"route": "execute"}
         # Approval policy (auto-approve, execute-from-stored-payload) is the next slice:
         # for now a restricted action always parks as a pending approval and ends the run.
+        if repo.get_pending_approval(st["candidate_id"], d.action):
+            return {"route": "end"}  # already waiting on the CEO; don't stack requests
         aid = repo.create_approval(st["job_id"], st["candidate_id"], d.action, d.args, d.reasoning)
         repo.emit_event(st["job_id"], E.ApprovalRequested, st["candidate_id"],
                         {"approval_id": aid, "action": d.action.value})
