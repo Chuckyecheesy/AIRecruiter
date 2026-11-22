@@ -9,6 +9,7 @@ import { useRecruiterRuntime } from "@/lib/runtime";
 import { useJobStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { CandidateDrawer } from "./CandidateDrawer";
+import { Wordmark } from "./TopBar";
 import { Pipeline } from "./Pipeline";
 import { PolicyToggle } from "./PolicyToggle";
 import { RecruiterToolUIs } from "./tool-uis";
@@ -22,7 +23,7 @@ const ACTION_NOUN: Record<string, string> = {
 
 const Welcome: FC = () => (
   <div className="mb-6 px-2">
-    <p className="text-xl font-medium text-ink">The agent hasn’t done anything yet.</p>
+    <p className="font-display text-2xl font-medium text-ink">The agent hasn’t done anything yet.</p>
     <p className="mt-1 text-sm text-quiet">Its decisions, and every action that needs your approval, will show up here.</p>
   </div>
 );
@@ -55,7 +56,7 @@ export const JobView: FC<{ jobId: string }> = ({ jobId }) => {
 
   if (error && !job)
     return (
-      <main className="mx-auto max-w-lg p-8">
+      <main className="mx-auto max-w-lg p-8 pt-20">
         <p className="text-ink">Couldn’t load this role: {error}</p>
         <p className="mt-2 text-sm text-quiet">Check that the API is running and NEXT_PUBLIC_API_URL points at it.</p>
         <Link href="/" className="mt-4 inline-block text-agent underline">
@@ -68,12 +69,10 @@ export const JobView: FC<{ jobId: string }> = ({ jobId }) => {
     <AssistantRuntimeProvider runtime={runtime}>
       <RecruiterToolUIs />
       <div className="flex h-dvh flex-col">
-        <header className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line bg-white px-4 py-2.5">
+        <header className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line bg-canvas px-4 py-3 sm:px-6">
           <div className="min-w-0">
-            <Link href="/" className="text-xs text-quiet hover:text-ink">
-              AIRecruiter
-            </Link>
-            <h1 className="truncate text-lg leading-tight font-semibold text-ink">{job?.title ?? "Loading…"}</h1>
+            <Wordmark className="text-xs text-quiet [&>span]:size-1.5" />
+            <h1 className="truncate text-xl leading-tight font-semibold text-ink">{job?.title ?? "Loading…"}</h1>
           </div>
           {job && <JobStateControl />}
           <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -83,7 +82,7 @@ export const JobView: FC<{ jobId: string }> = ({ jobId }) => {
               </span>
             )}
             <PolicyToggle />
-            <Link href={`/jobs/${jobId}/shortlist`} className="rounded-md border border-line px-3 py-1.5 text-sm text-ink hover:bg-canvas">
+            <Link href={`/jobs/${jobId}/shortlist`} className="rounded-full border border-line bg-surface px-4 py-1.5 text-sm text-ink transition hover:border-ink/40">
               Shortlist
             </Link>
             <span
@@ -94,14 +93,14 @@ export const JobView: FC<{ jobId: string }> = ({ jobId }) => {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <aside className="max-h-64 shrink-0 overflow-y-auto border-b border-line bg-canvas md:max-h-none md:w-72 md:border-r md:border-b-0" aria-label="Pipeline">
+          <aside className="max-h-64 shrink-0 overflow-y-auto border-b border-line bg-canvas md:max-h-none md:w-76 md:border-r md:border-b-0" aria-label="Pipeline">
             <Pipeline />
           </aside>
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
             {(candidateFilter || target) && (
               <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-1.5 text-sm">
                 {candidateFilter && (
-                  <span className="flex items-center gap-1.5 rounded-full bg-canvas px-2.5 py-0.5">
+                  <span className="flex items-center gap-1.5 rounded-full bg-sunk px-2.5 py-0.5">
                     Showing only {filtered?.name ?? "one candidate"}
                     <button type="button" onClick={() => setFilter(null)} className="text-quiet hover:text-ink" aria-label="Show everyone">
                       ✕
@@ -163,7 +162,7 @@ const JobStateControl: FC = () => {
         </button>
       )}
       {job.state === "DRAFT" && (
-        <button type="button" disabled={busy} onClick={() => act(() => api.startJob(job.id))} className="rounded-md bg-ink px-2.5 py-1 text-white">
+        <button type="button" disabled={busy} onClick={() => act(() => api.startJob(job.id))} className="rounded-full bg-gate px-3.5 py-1 text-surface transition hover:bg-gate-deep">
           Start recruiter
         </button>
       )}

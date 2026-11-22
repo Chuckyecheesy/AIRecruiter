@@ -33,11 +33,11 @@ export const PolicyToggle: FC = () => {
         disabled={busy}
         onClick={toggle}
         className={cn(
-          "relative h-6 w-11 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-agent",
-          on ? "bg-ok" : "bg-line",
+          "relative h-6 w-11 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gate",
+          on ? "bg-agent" : "bg-[#e2d5c3]",
         )}
       >
-        <span className={cn("absolute top-0.5 size-5 rounded-full bg-white shadow-sm transition-[left]", on ? "left-[22px]" : "left-0.5")} />
+        <span className={cn("absolute top-0.5 size-5 rounded-full bg-surface shadow-sm transition-[left]", on ? "left-[22px]" : "left-0.5")} />
       </button>
       <span className="w-28 text-xs text-quiet">{on ? "Agent acts alone (rejections still ask)" : "Agent asks first"}</span>
     </label>

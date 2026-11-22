@@ -27,8 +27,8 @@ export const CandidateDrawer: FC = () => {
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label={detail?.name ?? "Candidate"}>
-      <button type="button" aria-label="Close" className="absolute inset-0 bg-ink/20" onClick={() => close(null)} />
-      <aside className="relative flex h-full w-full max-w-xl flex-col bg-white shadow-xl">
+      <button type="button" aria-label="Close" className="absolute inset-0 bg-ink/25 backdrop-blur-[2px]" onClick={() => close(null)} />
+      <aside className="relative flex h-full w-full max-w-xl flex-col border-l border-line bg-canvas shadow-[-24px_0_60px_-30px_rgba(43,36,32,0.35)]">
         <header className="border-b border-line px-5 pt-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -69,7 +69,7 @@ const NeedsHumanBanner: FC<{ d: CandidateDetail }> = ({ d }) => {
   };
   const lastError = [...d.events].reverse().find((e) => e.type === "Escalated")?.payload?.error;
   return (
-    <div className="mt-3 rounded-md border border-danger/30 bg-danger/5 p-3 text-sm">
+    <div className="mt-3 rounded-xl border border-danger/30 bg-danger/5 p-3 text-sm">
       <p className="text-ink">{d.state === "STALE" ? "No reply after the follow-up." : (lastError ?? "The agent stopped and needs you.")}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         {d.traceUrl && (
@@ -77,10 +77,10 @@ const NeedsHumanBanner: FC<{ d: CandidateDetail }> = ({ d }) => {
             Open trace in Langfuse
           </a>
         )}
-        <button type="button" onClick={() => act(() => api.resumeCandidate(d.id))} className="rounded-md bg-ink px-3 py-1 text-white">
+        <button type="button" onClick={() => act(() => api.resumeCandidate(d.id))} className="rounded-full bg-ink px-3.5 py-1 text-surface">
           {d.state === "STALE" ? "Reactivate" : "Resume"}
         </button>
-        <button type="button" onClick={() => act(() => api.skipCandidate(d.id))} className="rounded-md border border-line px-3 py-1">
+        <button type="button" onClick={() => act(() => api.skipCandidate(d.id))} className="rounded-full border border-line px-3.5 py-1">
           Skip
         </button>
       </div>
@@ -148,7 +148,7 @@ const TabBody: FC<{ tab: Tab; d: CandidateDetail }> = ({ tab, d }) => {
               await api.setDisposition(d.id, (e.target.value || null) as Disposition | null);
               refresh(d.id);
             }}
-            className="rounded-md border border-line bg-white px-2 py-1 text-sm"
+            className="rounded-full border border-line bg-surface px-3 py-1 text-sm"
           >
             <option value="">Random</option>
             {DISPOSITIONS.map((x) => (
@@ -181,7 +181,7 @@ const TabBody: FC<{ tab: Tab; d: CandidateDetail }> = ({ tab, d }) => {
     return d.messages.length ? (
       <ol className="space-y-3">
         {d.messages.map((msg) => (
-          <li key={msg.id} className={cn("rounded-md border p-3", msg.direction === "out" ? "border-line bg-white" : "border-agent/20 bg-agent/5")}>
+          <li key={msg.id} className={cn("rounded-xl border p-3", msg.direction === "out" ? "border-line bg-surface" : "border-agent/20 bg-agent/5")}>
             <p className="text-xs text-quiet">
               {msg.direction === "out" ? "We wrote" : `${d.name} replied`} at {new Date(msg.createdAt).toLocaleTimeString()}
               {msg.simulated && " (simulated)"}
@@ -206,7 +206,7 @@ const TabBody: FC<{ tab: Tab; d: CandidateDetail }> = ({ tab, d }) => {
             <a href={iv.joinUrl} target="_blank" rel="noreferrer" className="text-agent underline underline-offset-2">
               Open interview
             </a>
-            <button type="button" onClick={() => navigator.clipboard.writeText(iv.joinUrl!)} className="rounded-md border border-line px-3 py-1">
+            <button type="button" onClick={() => navigator.clipboard.writeText(iv.joinUrl!)} className="rounded-full border border-line px-3.5 py-1">
               Copy join link
             </button>
           </div>

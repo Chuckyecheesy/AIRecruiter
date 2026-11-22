@@ -60,10 +60,10 @@ const Btn: FC<{
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      "rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-agent disabled:opacity-50",
-      tone === "primary" && "bg-ink text-white hover:bg-ink/85",
-      tone === "plain" && "border border-line bg-white text-ink hover:bg-canvas",
-      tone === "danger" && "border border-danger/30 bg-white text-danger hover:bg-danger/5",
+      "rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gate disabled:opacity-50",
+      tone === "primary" && "bg-ink text-surface hover:bg-ink/85",
+      tone === "plain" && "border border-line bg-surface text-ink hover:border-ink/40",
+      tone === "danger" && "border border-danger/30 bg-surface text-danger hover:bg-danger/5",
     )}
   >
     {children}
@@ -82,28 +82,28 @@ const Gate: FC<{ approval: Approval | null; children: ReactNode; footer?: ReactN
   const focused = useJobStore((s) => s.focusedApprovalId === approval?.id);
   const setFocus = useJobStore((s) => s.setFocusedApproval);
   if (!approval)
-    return <div className="my-2 h-28 animate-pulse rounded-lg border border-line bg-white motion-reduce:animate-none" />;
+    return <div className="my-2 h-28 animate-pulse rounded-2xl border border-line bg-surface motion-reduce:animate-none" />;
   const pending = approval.status === "pending";
   return (
     <section
       aria-label={`${ACTION_TITLE[approval.action]} for ${approval.candidateName}`}
       onClick={() => pending && setFocus(approval.id)}
       className={cn(
-        "my-3 overflow-hidden rounded-lg border bg-white",
-        pending ? "border-gate/40 border-l-[6px] border-l-gate" : "border-line border-l-[6px] border-l-line",
+        "my-3 overflow-hidden rounded-2xl border bg-surface",
+        pending ? "border-gate/50 shadow-[0_0_0_4px_rgba(194,86,46,0.08)]" : "border-line",
         focused && "ring-2 ring-gate/40",
       )}
     >
-      <header className="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-3">
-        <h3 className="text-[15px] font-semibold text-ink">
+      <header className="flex flex-wrap items-baseline justify-between gap-2 px-5 pt-4">
+        <h3 className="text-[17px] font-semibold text-ink">
           {ACTION_TITLE[approval.action]} <span className="font-normal text-quiet">for</span>{" "}
           <CandidateLink id={approval.candidateId} name={approval.candidateName} />
         </h3>
         <StatusBadge approval={approval} />
       </header>
-      {approval.reasoning && <p className="px-4 pt-1 text-sm text-quiet">Agent’s reasoning: {approval.reasoning}</p>}
-      <div className="px-4 py-3">{children}</div>
-      {footer && <footer className="border-t border-line bg-canvas/60 px-4 py-2.5">{footer}</footer>}
+      {approval.reasoning && <p className="px-5 pt-1 text-sm text-quiet">Agent’s reasoning: {approval.reasoning}</p>}
+      <div className="px-5 py-3.5">{children}</div>
+      {footer && <footer className="border-t border-line bg-sunk/50 px-5 py-3">{footer}</footer>}
     </section>
   );
 };
@@ -114,10 +114,10 @@ const StatusBadge: FC<{ approval: Approval }> = ({ approval }) => {
     pending: ["Waiting for your approval", "bg-gate/10 text-gate"],
     approved: [by, "bg-ok/10 text-ok"],
     executed: [approval.decidedBy === "auto" ? "Auto-approved, done" : "Approved, done", "bg-ok/10 text-ok"],
-    rejected: ["Sent back", "bg-canvas text-quiet"],
-    expired: ["Expired", "bg-canvas text-quiet"],
+    rejected: ["Sent back", "bg-sunk text-quiet"],
+    expired: ["Expired", "bg-sunk text-quiet"],
   };
-  const [label, cls] = map[approval.status] ?? [approval.status, "bg-canvas text-quiet"];
+  const [label, cls] = map[approval.status] ?? [approval.status, "bg-sunk text-quiet"];
   return <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium", cls)}>{label}</span>;
 };
 
@@ -156,7 +156,7 @@ const Decide: FC<{
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           placeholder={feedbackPlaceholder}
-          className="min-w-0 flex-1 rounded-md border border-line bg-white px-3 py-1.5 text-sm outline-none focus:border-ink"
+          className="min-w-0 flex-1 rounded-full border border-line bg-surface px-4 py-1.5 text-sm outline-none focus:border-ink/60"
         />
         <div className="flex gap-2">
           <Btn type="submit" tone="primary" disabled={busy || !feedback.trim()}>
@@ -205,7 +205,7 @@ const EmailDraftCard: FC<{ args: { approvalId: string } }> = ({ args }) => {
         />
       }
     >
-      <div className="rounded-md border border-line">
+      <div className="rounded-xl border border-line">
         <div className="flex gap-3 border-b border-line px-3 py-2 text-sm">
           <span className="w-14 shrink-0 text-quiet">To</span>
           <span className="truncate text-ink">{p.to ?? approval.candidateName}</span>
@@ -245,7 +245,7 @@ const InterviewLive: FC<{ interview: Interview }> = ({ interview }) => {
     expired: "Link expired",
   }[interview.status];
   return (
-    <div className="mt-3 rounded-md border border-line p-3">
+    <div className="mt-3 rounded-xl border border-line p-3">
       <p className="flex items-center gap-2 text-sm text-ink">
         <span
           className={cn(
@@ -317,7 +317,7 @@ const InterviewOnlyCard: FC<{ args: { candidateId: string } }> = ({ args }) => {
   const detail = useCandidateDetail(args.candidateId);
   if (!detail?.interview) return null;
   return (
-    <section className="my-3 rounded-lg border border-line bg-white px-4 py-3">
+    <section className="my-3 rounded-2xl border border-line bg-surface px-4 py-3">
       <h3 className="text-[15px] font-semibold text-ink">
         Voice interview with <CandidateLink id={detail.id} name={detail.name} />
       </h3>
@@ -405,7 +405,7 @@ const EvaluationCard: FC<{ args: { candidateId: string; evaluationId?: string; s
   const threshold = useJobStore((s) => s.job?.scoreThreshold);
   const ev = detail?.evaluation;
   return (
-    <section className="my-3 rounded-lg border border-line bg-white px-4 py-3">
+    <section className="my-3 rounded-2xl border border-line bg-surface px-4 py-3">
       <h3 className="mb-2 text-[15px] font-semibold text-ink">
         Evaluation of <CandidateLink id={args.candidateId} name={detail?.name} />
       </h3>
@@ -431,7 +431,7 @@ const NeedsHumanCard: FC<{ args: { candidateId: string; error: string; traceUrl:
     }
   };
   return (
-    <section className={cn("my-3 rounded-lg border bg-white px-4 py-3", stillStuck ? "border-danger/40 border-l-[6px] border-l-danger" : "border-line")}>
+    <section className={cn("my-3 rounded-2xl border bg-surface px-4 py-3", stillStuck ? "border-danger/50 shadow-[0_0_0_4px_rgba(179,38,30,0.07)]" : "border-line")}>
       <h3 className="text-[15px] font-semibold text-ink">
         <CandidateLink id={args.candidateId} name={cand?.name} /> needs you
       </h3>

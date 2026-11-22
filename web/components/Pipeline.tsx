@@ -31,10 +31,10 @@ const Card: FC<{ c: Candidate }> = ({ c }) => {
   return (
     <li
       className={cn(
-        "group rounded-md border bg-white px-2.5 py-2 text-sm transition-colors",
-        active ? "border-ink" : "border-line hover:border-quiet/50",
-        c.needsHuman && "border-l-4 border-l-danger",
-        !c.needsHuman && c.pendingApprovalId && "border-l-4 border-l-gate",
+        "group rounded-xl border bg-surface px-3 py-2.5 text-sm transition-colors",
+        active ? "border-ink/70 ring-1 ring-ink/10" : "border-line hover:border-ink/25",
+        c.needsHuman && "border-l-[3px] border-l-danger",
+        !c.needsHuman && c.pendingApprovalId && "border-l-[3px] border-l-gate",
       )}
     >
       <button
@@ -46,7 +46,7 @@ const Card: FC<{ c: Candidate }> = ({ c }) => {
       >
         <span className="flex items-baseline justify-between gap-2">
           <span className="truncate font-medium text-ink">{c.name}</span>
-          {c.score != null && <span className="tabular-nums text-quiet">{c.score}</span>}
+          {c.score != null && <span className="font-mono text-xs tabular-nums text-quiet">{c.score}</span>}
         </span>
         {c.headline && <span className="block truncate text-xs text-quiet">{c.headline}</span>}
         <span className="mt-1 flex items-center gap-1.5 text-xs">
@@ -78,7 +78,7 @@ export const Pipeline: FC = () => {
     return <p className="p-4 text-sm text-quiet">No candidates yet. They appear here as the agent finds them.</p>;
 
   return (
-    <div className="flex flex-col gap-4 p-3">
+    <div className="flex flex-col gap-5 p-4">
       {needsHuman.length > 0 && <Column title="Needs you" items={needsHuman} tone="danger" />}
       {columns.map((col) => (
         <Column key={col.title} title={col.title} items={col.items} />
@@ -89,9 +89,9 @@ export const Pipeline: FC = () => {
 
 const Column: FC<{ title: string; items: Candidate[]; tone?: "danger" }> = ({ title, items, tone }) => (
   <section aria-label={title}>
-    <h2 className={cn("mb-1.5 flex items-baseline justify-between text-sm font-semibold", tone === "danger" ? "text-danger" : "text-ink")}>
+    <h2 className={cn("label-mono mb-2 flex items-baseline justify-between px-0.5", tone === "danger" ? "text-danger" : "text-quiet")}>
       {title}
-      <span className="text-xs font-normal tabular-nums text-quiet">{items.length}</span>
+      <span className="tabular-nums">{items.length}</span>
     </h2>
     {items.length > 0 ? (
       <ul className="flex flex-col gap-1.5">
@@ -100,7 +100,7 @@ const Column: FC<{ title: string; items: Candidate[]; tone?: "danger" }> = ({ ti
         ))}
       </ul>
     ) : (
-      <p className="text-xs text-quiet/70">Nobody here yet</p>
+      <p className="px-0.5 text-xs text-quiet/60">Nobody here yet</p>
     )}
   </section>
 );
