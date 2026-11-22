@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional, TypedDict
@@ -19,7 +20,9 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from ulid import ULID
 
 from api.agent.decide import decide_validated
-from api.agent.permissions import permission_class
+from api.agent.permissions import (
+    PermissionDenied, Verdict, assert_approved, check_permission, execute_approved,
+)
 from api.agent.state_machine import apply_transition, job_valid_actions, valid_actions
 from api.contracts import (
     ActionName as A, CandidateMemory, CandidateState as S, Decision, Event, EventType as E,
@@ -27,7 +30,9 @@ from api.contracts import (
 )
 from api.db import repo
 from api.tools.base import ToolError
-from api.tools.models import SearchCriteria
+from api.config import settings
+from api.tools.models import Message, SearchCriteria
+from api.tools.persona import pick_disposition
 
 DEFAULT_CHECKPOINT_DB = "data/checkpoints.db"
 MAX_RETRIES = 3
@@ -117,6 +122,62 @@ async def _wait(tools, st) -> dict:
     return {}
 
 
+def _thread(mem: CandidateMemory, extra_in: Optional[str] = None) -> list[Message]:
+    """Email thread so far (oldest first), rebuilt from the contact log."""
+    msgs = [Message(direction="out" if e["kind"] == "email_out" else "in",
+                    subject=e.get("subject"), body=e.get("body", ""))
+            for e in mem.contact_log if e.get("kind") in ("email_out", "email_in")]
+    if extra_in is not None:
+        msgs.append(Message(direction="in", body=extra_in))
+    return msgs
+
+
+def _thread_id(st) -> str:
+    return f"thread-{st['candidate_id']}"
+
+
+async def _send_email(tools, st) -> dict:
+    d, mem = st["decision"], st["memory"]
+    to = (mem.contact or {}).get("email")
+    if not to:
+        raise ToolError("invalid_input", "no contact email on file")
+    subject, body = d.args.get("subject"), d.args.get("body") or ""
+    tid = _thread_id(st)
+    receipt = await tools.email.send(to, subject or "", body, tid)
+    out = {"to": to, "subject": subject, "body": body, "thread_id": tid,
+           "message_id": getattr(receipt, "message_id", None)}
+    if d.action == A.send_outreach:
+        # The simulated candidate decides whether and how to answer (pinned for scripted demos).
+        disposition = (st["candidate"] or {}).get("demo_disposition") or pick_disposition()
+        out["disposition"] = disposition
+        if disposition != "no_reply":
+            sent = Message(direction="out", subject=subject, body=body)
+            out["persona_reply"] = await tools.persona.reply(
+                mem.profile, _thread(mem) + [sent], disposition)
+    return out
+
+
+async def _schedule_interview(tools, st) -> dict:
+    d, mem = st["decision"], st["memory"]
+    session = await tools.elevenlabs.create_interview(
+        st["candidate_id"], list(d.args.get("questions") or []),
+        d.args.get("context") or mem.summary,
+        job_id=st["job_id"], candidate_name=(st["candidate"] or {}).get("name"))
+    return {"session": {"conversation_id": getattr(session, "conversation_id", None),
+                        "join_url": getattr(session, "join_url", None)}}
+
+
+async def _process_reply(tools, st) -> dict:
+    text = st["event"].payload.get("body") or ""
+    cls = await tools.classifier.classify(text)
+    out = {"classification": cls.intent, "body": text, "reasoning": cls.reasoning}
+    if cls.intent == "question":
+        draft = await tools.drafter.reply(SimpleNamespace(**st["job"]), st["memory"],
+                                          _thread(st["memory"], extra_in=text))
+        out["draft"] = draft.model_dump(mode="json")
+    return out
+
+
 EXECUTORS = {
     A.search_candidates: ("ploid", _search),
     A.enrich_candidate: ("ploid", _enrich),
@@ -125,6 +186,11 @@ EXECUTORS = {
     A.draft_outreach: ("drafter", _draft),
     A.redraft_outreach: ("drafter", _draft),
     A.wait: ("none", _wait),
+    A.send_outreach: ("email", _send_email),
+    A.send_followup: ("email", _send_email),
+    A.schedule_interview: ("elevenlabs", _schedule_interview),
+    A.reject_candidate_proposal: ("none", _wait),
+    A.process_reply: ("classifier", _process_reply),
 }
 
 NEXT_EVENT = {
@@ -145,7 +211,21 @@ def _memory_patch(action: A, result: dict, mem: CandidateMemory) -> dict:
         return {"contact": result["contact"]}
     if action in (A.draft_outreach, A.redraft_outreach):
         return {"contact_log": mem.contact_log + [{"kind": "draft", "ts": repo.now_iso(), **result["draft"]}]}
+    if action in (A.send_outreach, A.send_followup):
+        return {"contact_log": mem.contact_log + [{
+            "kind": "email_out", "ts": repo.now_iso(), "to": result["to"],
+            "subject": result["subject"], "body": result["body"]}]}
+    if action == A.process_reply:
+        log = mem.contact_log + [{"kind": "email_in", "ts": repo.now_iso(), "body": result["body"]}]
+        if result.get("draft"):
+            log.append({"kind": "draft_reply", "ts": repo.now_iso(), **result["draft"]})
+        return {"contact_log": log}
     return {}
+
+
+def _iso_in(seconds: float) -> str:
+    d = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return d.strftime("%Y-%m-%dT%H:%M:%S.") + f"{d.microsecond // 1000:03d}Z"
 
 
 # ---------- graph ----------
@@ -175,9 +255,19 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         # Escalations/failures already put the candidate in front of a human; don't loop on them.
         if state == S.NEEDS_HUMAN and ev.type != E.HumanResolved:
             out["route"] = "end"
-        else:
-            out["valid_actions"] = valid_actions(state, job)
-            out["route"] = "decide" if out["valid_actions"] else "end"
+            return out
+        out["valid_actions"] = valid_actions(state, job)
+        if ev.type == E.ApprovalGranted:
+            # Execute exactly what the CEO approved; the LLM is not consulted.
+            ap = repo.get_approval(ev.payload.get("approval_id") or "")
+            if (ap is None or ap.status != "approved" or ap.candidate_id != cid
+                    or ap.action not in out["valid_actions"]):
+                out["route"] = "end"  # replay, rejected, already executed, or no longer applicable
+            else:
+                out.update(approval=ap, route="execute", decision=Decision(
+                    action=ap.action, args=ap.payload, reasoning=ap.reasoning or "approved by CEO"))
+            return out
+        out["route"] = "decide" if out["valid_actions"] else "end"
         return out
 
     async def decide(st: AgentState) -> dict:
@@ -203,15 +293,26 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
                 "escalate_reason": d.reasoning}
 
     async def permission_check(st: AgentState) -> dict:
-        d = st["decision"]
-        if permission_class(d.action) != PermissionClass.RESTRICTED:
+        d, cid = st["decision"], st["candidate_id"]
+        verdict = check_permission(d.action, st["job"].get("permission_policy"))
+        if verdict == Verdict.allow:
             return {"route": "execute"}
-        # Approval policy (auto-approve, execute-from-stored-payload) is the next slice:
-        # for now a restricted action always parks as a pending approval and ends the run.
-        if repo.get_pending_approval(st["candidate_id"], d.action):
+        ap = repo.get_approved_approval(cid, d.action)  # approved but not yet executed: use it as stored
+        if ap is not None:
+            return {"approval": ap, "route": "execute"}
+        if verdict == Verdict.auto_approve:
+            aid = repo.create_approval(st["job_id"], cid, d.action, d.args, d.reasoning,
+                                       status="approved", decided_by="auto")
+            if d.action == A.send_outreach and st["candidate"]["state"] == S.OUTREACH_DRAFTED.value:
+                repo.set_candidate_state(cid, S.APPROVED)  # same durable state as a CEO approval
+            repo.emit_event(st["job_id"], E.ApprovalGranted, cid,
+                            {"approval_id": aid, "action": d.action.value, "auto": True})
+            return {"approval": repo.get_approval(aid), "candidate": repo.get_candidate(cid),
+                    "route": "execute"}
+        if repo.get_pending_approval(cid, d.action):
             return {"route": "end"}  # already waiting on the CEO; don't stack requests
-        aid = repo.create_approval(st["job_id"], st["candidate_id"], d.action, d.args, d.reasoning)
-        repo.emit_event(st["job_id"], E.ApprovalRequested, st["candidate_id"],
+        aid = repo.create_approval(st["job_id"], cid, d.action, d.args, d.reasoning)
+        repo.emit_event(st["job_id"], E.ApprovalRequested, cid,
                         {"approval_id": aid, "action": d.action.value})
         return {"route": "end"}
 
@@ -228,6 +329,27 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         if tools is None:
             from api.tools import get_tools
             tools = deps.tools = get_tools()
+
+        async def run(payload: Optional[dict] = None) -> dict:
+            # Restricted actions run on the stored approval payload, never on fresh LLM args.
+            s2 = st if payload is None else {**st, "decision": d.model_copy(update={"args": payload})}
+            return await _run_with_retries(tool, fn, tools, s2, key)
+
+        try:
+            if check_permission(d.action, st["job"].get("permission_policy")) == Verdict.allow:
+                result = await run()
+            else:  # defense in depth: restricted tools re-check the approval themselves
+                ap = st.get("approval")
+                assert_approved(ap, d.action)
+                result = await execute_approved(ap.id, run)
+        except PermissionDenied:
+            return {"route": "end"}
+        except ToolError as e:
+            return _fail(st, e, getattr(e, "attempts", 1))
+        return {"result": result, "route": "update_state"}
+
+    async def _run_with_retries(tool: str, fn, tools, st: AgentState, key: str) -> dict:
+        d: Decision = st["decision"]
         started, attempt = time.monotonic(), 0
         while True:
             attempt += 1
@@ -240,14 +362,15 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
                         run_id=st["run_id"], candidate_id=st.get("candidate_id"), tool=tool,
                         action=d.action, idempotency_key=key, input=d.args, output=None,
                         status="error", error_kind=e.kind, attempts=attempt)
-                    return _fail(st, e, attempt)
+                    e.attempts = attempt
+                    raise
                 await asyncio.sleep(delay)
                 continue
             repo.record_tool_call(
                 run_id=st["run_id"], candidate_id=st.get("candidate_id"), tool=tool, action=d.action,
                 idempotency_key=key, input=d.args, output=result, status="ok", attempts=attempt,
                 latency_ms=int((time.monotonic() - started) * 1000))
-            return {"result": result, "route": "update_state"}
+            return result
 
     def _fail(st: AgentState, e: ToolError, attempts: int) -> dict:
         repo.emit_event(st["job_id"], E.ToolFailed, st.get("candidate_id"),
@@ -271,9 +394,22 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         summary = (mem.summary + f" {d.action.value}: {d.reasoning}")[-800:].strip()
         repo.set_candidate_state(cid, new_state)
         repo.update_memory(cid, **patch, decisions=decisions, summary=summary)
+        _record_messages(st, d.action, result, cid, job)
         if d.action in NEXT_EVENT:
             repo.emit_event(st["job_id"], NEXT_EVENT[d.action], cid, {"from": cand["state"]})
         return {}
+
+    def _record_messages(st: AgentState, action: A, result: dict, cid: str, job: dict) -> None:
+        if action in (A.send_outreach, A.send_followup):
+            repo.add_message(cid, "out", result["body"], subject=result["subject"],
+                             thread_id=result["thread_id"])
+            repo.emit_event(job["id"], E.EmailSent, cid, {
+                "to": result["to"], "subject": result["subject"], "message_id": result["message_id"]})
+            if result.get("persona_reply"):  # delayed, so the demo shows the agent waiting
+                repo.emit_event(job["id"], E.EmailReplied, cid, {"body": result["persona_reply"]},
+                                not_before=_iso_in(settings.persona_delay_s))
+        elif action == A.process_reply:
+            repo.add_message(cid, "in", result["body"], thread_id=f"thread-{cid}")
 
     async def escalate(st: AgentState) -> dict:
         reason = st.get("escalate_reason") or "escalated"
@@ -289,7 +425,7 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         g.add_node(name, fn)
     g.add_edge(START, "observe")
     for src, targets in {
-        "observe": {"decide"}, "decide": {"permission_check", "escalate"},
+        "observe": {"decide", "execute"}, "decide": {"permission_check", "escalate"},
         "permission_check": {"execute"}, "execute": {"update_state", "escalate"},
     }.items():
         g.add_conditional_edges(

@@ -369,6 +369,38 @@ def mark_approval_executed(approval_id: str) -> bool:
         return cur.rowcount == 1
 
 
+def release_approval_claim(approval_id: str) -> bool:
+    """Undo a claim whose execution failed (executed -> approved) so a retry can run it."""
+    with get_conn() as c:
+        cur = c.execute("UPDATE approvals SET status='approved', executed_at=NULL"
+                        " WHERE id=? AND status='executed'", (approval_id,))
+        return cur.rowcount == 1
+
+
+def get_approved_approval(candidate_id: str, action: ActionName) -> Optional[Approval]:
+    """Oldest approved-but-not-yet-executed approval for this candidate and action."""
+    with get_conn() as c:
+        r = c.execute("SELECT * FROM approvals WHERE candidate_id=? AND action=? AND status='approved'"
+                      " ORDER BY created_at LIMIT 1",
+                      (candidate_id, ActionName(action).value)).fetchone()
+    return _approval(r) if r else None
+
+
+def add_message(candidate_id: str, direction: str, body: str, *, subject: Optional[str] = None,
+                thread_id: Optional[str] = None, channel: str = "email", simulated: bool = True) -> str:
+    """Insert a `messages` row (out = sent by the agent, in = from the candidate)."""
+    if direction not in ("out", "in"):
+        raise ValueError(f"direction must be 'out' or 'in', got {direction!r}")
+    mid, ts = _new_id(), now_iso()
+    with get_conn() as c:
+        r = _candidate_row(c, candidate_id)
+        c.execute("INSERT INTO messages (id, candidate_id, job_id, channel, direction, subject, body,"
+                  " thread_id, simulated, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  (mid, candidate_id, r["job_id"], channel, direction, subject, body, thread_id,
+                   1 if simulated else 0, ts))
+    return mid
+
+
 # ---------- CEO overrides ----------
 
 def resume_candidate(candidate_id: str) -> None:

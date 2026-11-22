@@ -36,7 +36,7 @@ Assumed behaviour in api/agent/graph.py:
       a delayed EmailReplied event (payload {"body": text}, not_before in the future).
       "no_reply" inserts no EmailReplied.
     - process_reply on EmailReplied (payload {"body": text}): writes an inbound `messages` row and a
-      contact_log entry (kind "email_in"), classifies via tools.persona.classify(text) ->
+      contact_log entry (kind "email_in"), classifies via tools.classifier.classify(text) ->
       ReplyClassification(intent), result {"classification": intent}: interested -> INTERESTED,
       declined -> DECLINED, question -> stays CONTACTED and runs draft_reply (tools.drafter.reply),
       stored as a contact_log entry of kind "draft_reply". process_reply needs no approval.
@@ -132,8 +132,10 @@ class FakeEleven:
 
 
 def tools_with(email=None, drafter=None, persona=None, elevenlabs=None):
+    persona = persona or FakePersona()
     return SimpleNamespace(email=email or FakeEmail(), drafter=drafter or FakeDrafter(),
-                           persona=persona or FakePersona(), elevenlabs=elevenlabs or FakeEleven())
+                           persona=persona, classifier=persona,  # real Tools has a separate .classifier
+                           elevenlabs=elevenlabs or FakeEleven())
 
 
 def messages_of(cid):
@@ -880,7 +882,7 @@ async def test_granted_event_for_an_unapproved_row_runs_no_tool(db, state, actio
                           tools=tools, llm=scripted(A.wait))
     assert tools.email.sent == [] and tools.elevenlabs.calls == []
     assert repo.get_approval(aid).status == decision
-    assert state_of(cid) not in (S.CONTACTED, S.INTERVIEWING)  # nothing ran, nothing moved on
+    assert state_of(cid) == state  # nothing ran, nothing moved on
 
 
 @pytest.mark.parametrize("action", [A.send_followup, A.schedule_interview])
