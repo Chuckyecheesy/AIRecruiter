@@ -29,6 +29,7 @@ from api.contracts import (
     JobState, PermissionClass,
 )
 from api.db import repo
+from api.observability import langfuse as tracing
 from api.tools.base import ToolError
 from api.config import settings
 from api.tools.models import Message, SearchCriteria
@@ -71,6 +72,7 @@ class AgentState(TypedDict, total=False):
     escalate_extra: dict
     tool_redecided: bool    # an invalid_input tool error already used the one re-decide
     redecide_error: Optional[str]
+    trace_url: Optional[str]
 
 
 def thread_id_for(job_id: str, candidate_id: Optional[str] = None) -> str:
@@ -569,9 +571,11 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
     async def escalate(st: AgentState) -> dict:
         reason = st.get("escalate_reason") or "escalated"
         if st.get("candidate_id"):
-            repo.escalate_candidate(st["candidate_id"], reason, extra=st.get("escalate_extra"))
+            repo.escalate_candidate(st["candidate_id"], reason, trace_url=st.get("trace_url"),
+                                    extra=st.get("escalate_extra"))
         else:
-            repo.emit_event(st["job_id"], E.Escalated, None, {"reason": reason})
+            repo.emit_event(st["job_id"], E.Escalated, None,
+                            {"reason": reason, "trace_url": st.get("trace_url")})
         return {}
 
     g = StateGraph(AgentState)
@@ -640,6 +644,14 @@ async def run_event(
         repo.finish_run(run_id, "error", None, "candidate locked by another owner")
         raise repo.LockBusy(f"candidate {cid} is locked by another owner")
     status, err, final = "ok", None, {}
+    trace = tracing.NOOP
+    try:
+        cand = repo.get_candidate(cid) if cid else None
+        trace = tracing.start_run_trace(
+            job_id=event.job_id, candidate_id=cid, state=cand["state"] if cand else "job",
+            event_type=event.type.value)
+    except Exception:  # noqa: BLE001 - tracing is best-effort
+        pass
     try:
         async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
             saver.serde = _SERDE
@@ -652,7 +664,7 @@ async def run_event(
                  "decide_attempts": 0, "run_id": run_id, "route": "decide",
                  "decision": None, "result": None, "error": None, "approval": None,
                  "escalate_reason": "", "escalate_extra": {}, "valid_actions": [],
-                 "tool_redecided": False, "redecide_error": None},
+                 "tool_redecided": False, "redecide_error": None, "trace_url": trace.url},
                 config={"configurable": {"thread_id": tid}})
             # Finished cleanly: drop this thread's history. Checkpoints of a crashed run stay.
             await saver.adelete_thread(tid)
@@ -666,7 +678,8 @@ async def run_event(
         if lock_owner:
             await asyncio.to_thread(repo.release_lock, cid, lock_owner)
         d = final.get("decision")
-        repo.finish_run(run_id, status, d.action.value if d else None, err)
+        repo.finish_run(run_id, status, d.action.value if d else None, err,
+                        trace_url=trace.url, trace_id=trace.trace_id)
 
 
 async def handle_event(event: Event, owner: Optional[str] = None) -> None:

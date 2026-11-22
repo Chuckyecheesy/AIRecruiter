@@ -57,13 +57,13 @@
 - [ ] **Sync 2:50:** the voice interview path works end to end with B
 
 ## 2:50-3:40 Reliability + Langfuse → checkpoint: `NEEDS_HUMAN` with trace link
-- [ ] Retry taxonomy in `execute` (transient 1/2/4s, rate_limited with a 30s cap, not_found, invalid_input, fatal)
-- [ ] Retries exhausted → `ToolFailed` → `escalate` → `NEEDS_HUMAN`, `prev_state`, `trace_url`
+- [x] Retry taxonomy in `execute` (transient 1/2/4s, rate_limited with a 30s cap, not_found, invalid_input, fatal)
+- [x] Retries exhausted → `ToolFailed` → `escalate` → `NEEDS_HUMAN`, `prev_state`, `trace_url`
 - [ ] `observability/langfuse.py`: one trace per graph run (`recruiter.run`, `session_id=job_id`, tags), node spans, tool spans, LLM generations
 - [ ] Store `agent_runs.langfuse_trace_id` and `trace_url`
 - [ ] Scores: `decision_valid`, `evaluation_score`
-- [ ] No Langfuse keys → no-op tracing, `trace_url` null, app still runs
-- [ ] Duplicate guard in `search_candidates`: `(job_id, ploid_id)` or `name_key` + shared URL → skip, add a memory note, no `CandidateFound`
+- [x] No Langfuse keys → no-op tracing, `trace_url` null, app still runs
+- [x] Duplicate guard in `search_candidates`: `(job_id, ploid_id)` or `name_key` + shared URL → skip, add a memory note, no `CandidateFound`
 - [ ] `contact_log` check refuses a duplicate `send_outreach`
 - [ ] **Test:** restart the server mid-run and confirm pending events resume with no state lost
 - [ ] **Sync 3:40**
