@@ -48,9 +48,9 @@ def build_tools(s: Settings) -> Tools:
     status: dict[str, str] = {}
 
     def llm(model: str) -> LLM | None:
-        return LLM(s.anthropic_api_key, model) if s.llm_enabled else None
+        return LLM(s.llm_api_key, model, provider=s.llm_provider) if s.llm_enabled else None
 
-    llm_status = "real" if s.llm_enabled else "stub"
+    llm_status = f"real ({s.llm_provider})" if s.llm_enabled else "stub"
 
     # Ploid
     if s.mode_for("ploid") == "real" and s.ploid_api_key and s.ploid_base_url:

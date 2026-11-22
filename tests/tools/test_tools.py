@@ -1,8 +1,11 @@
 import random
+from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel
 
 from api.config import Settings
+from api.tools.llm import LLM
 from api.tools import ToolError, build_tools, pick_disposition
 from api.tools.fiber import demo_address
 from api.tools.models import EnrichedProfile, Message, RoleForm, SearchCriteria
@@ -12,6 +15,31 @@ def mock_settings(**kw) -> Settings:
     base = dict(tools_mode="mock", llm_mode="stub", anthropic_api_key=None, demo_inbox="demo@example.com",
                 mock_interview_delay_s=0.0, _env_file=None)
     return Settings(**{**base, **kw})
+
+
+def test_gemini_provider_is_default():
+    s = Settings(_env_file=None)
+    assert s.llm_provider == "gemini"
+    assert s.llm_api_key == s.gemini_api_key
+
+
+async def test_gemini_structured_output(monkeypatch):
+    class Output(BaseModel):
+        value: str
+
+    class Models:
+        async def generate_content(self, **kwargs):
+            assert kwargs["config"].response_schema is Output
+            return SimpleNamespace(parsed={"value": "ok"}, text='{"value":"ok"}')
+
+    client = SimpleNamespace(aio=SimpleNamespace(models=Models()))
+    monkeypatch.setattr("api.tools.llm.genai.Client", lambda **kwargs: client)
+
+    result = await LLM("test-key", "gemini-2.5-flash", provider="gemini").structured(
+        system="system", prompt="prompt", output=Output
+    )
+
+    assert result == Output(value="ok")
 
 
 @pytest.fixture

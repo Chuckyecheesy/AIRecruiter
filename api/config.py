@@ -12,11 +12,13 @@ Mode = Literal["mock", "real", "off"]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Claude
+    # LLM provider
+    llm_provider: Literal["anthropic", "gemini"] = "gemini"
     anthropic_api_key: str | None = None
-    model_decide: str = "claude-sonnet-5-5"
-    model_draft: str = "claude-sonnet-5-5"
-    model_eval: str = "claude-sonnet-5-5"
+    gemini_api_key: str | None = None
+    model_decide: str = "gemini-2.5-flash"
+    model_draft: str = "gemini-2.5-flash"
+    model_eval: str = "gemini-2.5-flash"
     llm_mode: Literal["real", "stub"] = "real"
 
     # Tool modes (per-tool override wins over TOOLS_MODE)
@@ -78,9 +80,12 @@ class Settings(BaseSettings):
 
     @property
     def llm_enabled(self) -> bool:
-        # The SDK also resolves ANTHROPIC_AUTH_TOKEN / `ant auth login` profiles, so don't require the key.
         # Set LLM_MODE=stub for fully offline work.
         return self.llm_mode == "real"
+
+    @property
+    def llm_api_key(self) -> str | None:
+        return self.gemini_api_key if self.llm_provider == "gemini" else self.anthropic_api_key
 
 
 @lru_cache
