@@ -57,10 +57,6 @@ def set_repo(repo: Any | None) -> None:
 def get_repo() -> Any:
     if _repo_override is not None:
         return _repo_override
-    if os.environ.get("REPO_IMPL") == "fake":  # dev only, until lane A's repo lands
-        from scripts import dev_fake_repo
-
-        return dev_fake_repo
     try:
         from api.db import repo  # type: ignore[attr-defined]
     except ImportError as e:  # lane A not merged yet
@@ -122,16 +118,13 @@ async def generate_rubric(form: JobForm) -> Rubric:
     if os.environ.get("LLM_MODE") == "stub":
         return stub_rubric(form)
     try:
-        from api.tools.rubric import RubricGenerator  # type: ignore
+        from api.tools import get_tools  # type: ignore
     except ImportError:
-        log.info("RubricGenerator not available yet; using stub rubric")
+        log.info("lane B tools not available; using stub rubric")
         return stub_rubric(form)
     try:
-        gen = RubricGenerator()
-        res = gen.generate(form)
-        if hasattr(res, "__await__"):
-            res = await res
-        return res if isinstance(res, Rubric) else Rubric.model_validate(res.model_dump() if hasattr(res, "model_dump") else res)
+        res = await get_tools().rubric.generate(form.model_dump())
+        return Rubric.model_validate(res.model_dump())
     except Exception as e:  # never block role creation on the rubric
         log.warning("RubricGenerator failed (%s); using stub rubric", e)
         return stub_rubric(form)

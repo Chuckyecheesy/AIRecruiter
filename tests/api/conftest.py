@@ -15,16 +15,14 @@ def seeded(tmp_path, monkeypatch):
     from scripts.reset_demo import reset_demo
 
     job_id = reset_demo(seed=True, path=db)
+    from api.db import repo
+
+    repo.init_db(db)
     return job_id
 
 
 @pytest.fixture()
 def client(seeded):
     from api.main import create_app
-    from api.routes import deps
-    from scripts import dev_fake_repo
-
-    deps.set_repo(dev_fake_repo)
     with TestClient(create_app()) as c:
         yield c
-    deps.set_repo(None)

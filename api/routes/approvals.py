@@ -19,7 +19,7 @@ def _pending_or_409(conn: sqlite3.Connection, approval_id: str) -> ApprovalOut:
     if not a:
         raise HTTPException(404, "approval not found")
     if a.status != ApprovalStatus.pending:
-        raise HTTPException(409, f"approval is already {a.status}")
+        raise HTTPException(409, f"approval is already {a.status.value}")
     return a
 
 
@@ -42,13 +42,13 @@ def get_approval(approval_id: str, conn: sqlite3.Connection = Depends(get_conn))
 
 def approve(conn: sqlite3.Connection, approval_id: str, payload: dict | None) -> ApprovalOut:
     _pending_or_409(conn, approval_id)
-    call_repo("decide_approval", approval_id, True, payload=payload, decided_by="ceo")
+    call_repo("decide_approval", approval_id, True, payload=payload)
     return queries.get_approval(conn, approval_id)  # type: ignore[return-value]
 
 
 def reject(conn: sqlite3.Connection, approval_id: str, feedback: str) -> ApprovalOut:
     _pending_or_409(conn, approval_id)
-    call_repo("decide_approval", approval_id, False, feedback=feedback, decided_by="ceo")
+    call_repo("decide_approval", approval_id, False, feedback=feedback)
     return queries.get_approval(conn, approval_id)  # type: ignore[return-value]
 
 

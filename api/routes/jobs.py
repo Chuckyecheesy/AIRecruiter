@@ -38,7 +38,7 @@ def list_jobs(conn: sqlite3.Connection = Depends(get_conn)):
 async def create_job(body: JobCreateIn, conn: sqlite3.Connection = Depends(get_conn)):
     form = JobForm(**body.model_dump(by_alias=False))
     rubric = await generate_rubric(form)
-    job_id = call_repo("create_job", form=form.model_dump(), rubric=rubric.model_dump())
+    job_id = call_repo("create_job", form.title, form.model_dump(), rubric=rubric.model_dump())
     return _job_or_404(conn, job_id)
 
 
@@ -60,13 +60,13 @@ def patch_job(job_id: str, body: JobPatchIn, conn: sqlite3.Connection = Depends(
 def start_job(job_id: str, conn: sqlite3.Connection = Depends(get_conn)):
     job = _job_or_404(conn, job_id)
     if job.state != JobState.DRAFT:
-        raise HTTPException(409, f"job is {job.state}, expected DRAFT")
+        raise HTTPException(409, f"job is {job.state.value}, expected DRAFT")
     repo = get_repo()
     if hasattr(repo, "start_job"):  # if lane A bundles state change + JobCreated
         repo.start_job(job_id)
     else:
         call_repo("set_job_state", job_id, JobState.ACTIVE)
-        call_repo("emit_event", job_id, None, EventType.JobCreated, {})
+        call_repo("emit_event", job_id, EventType.JobCreated, payload={})
     return _job_or_404(conn, job_id)
 
 
@@ -74,7 +74,7 @@ def start_job(job_id: str, conn: sqlite3.Connection = Depends(get_conn)):
 def pause_job(job_id: str, conn: sqlite3.Connection = Depends(get_conn)):
     job = _job_or_404(conn, job_id)
     if job.state != JobState.ACTIVE:
-        raise HTTPException(409, f"job is {job.state}, expected ACTIVE")
+        raise HTTPException(409, f"job is {job.state.value}, expected ACTIVE")
     call_repo("set_job_state", job_id, JobState.PAUSED)
     return _job_or_404(conn, job_id)
 
@@ -83,7 +83,7 @@ def pause_job(job_id: str, conn: sqlite3.Connection = Depends(get_conn)):
 def resume_job(job_id: str, conn: sqlite3.Connection = Depends(get_conn)):
     job = _job_or_404(conn, job_id)
     if job.state != JobState.PAUSED:
-        raise HTTPException(409, f"job is {job.state}, expected PAUSED")
+        raise HTTPException(409, f"job is {job.state.value}, expected PAUSED")
     call_repo("set_job_state", job_id, JobState.ACTIVE)
     return _job_or_404(conn, job_id)
 

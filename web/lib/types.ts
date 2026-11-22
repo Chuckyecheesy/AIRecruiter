@@ -230,8 +230,6 @@ export type JobPatchIn = Partial<{
   permissionPolicy: Partial<PermissionPolicy>;
 }>;
 
-export type ChatIn = { text: string; approvalId?: string | null; candidateId?: string | null };
-export type ChatOut = { reply: string; approvalId: string | null; actionTaken: string | null };
 
 // Pipeline column groups (spec 06)
 export const PIPELINE_COLUMNS: { title: string; states: CandidateState[] }[] = [
