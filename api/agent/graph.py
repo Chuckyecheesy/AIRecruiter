@@ -8,6 +8,7 @@ Only code applies transitions; the LLM only picks from `valid_actions`.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -32,7 +33,7 @@ from api.db import repo
 from api.observability import langfuse as tracing
 from api.tools.base import ToolError
 from api.config import settings
-from api.tools.models import Message, SearchCriteria
+from api.tools.models import Draft, Message, SearchCriteria
 from api.tools.persona import pick_disposition
 
 DEFAULT_CHECKPOINT_DB = "data/checkpoints.db"
@@ -122,7 +123,9 @@ async def _find_contact(tools, st) -> dict:
 
 async def _draft(tools, st) -> dict:
     fb = st["decision"].args.get("feedback") or st["event"].payload.get("feedback")
-    d = await tools.drafter.outreach(SimpleNamespace(**st["job"]), st["memory"], fb)
+    prev = _latest_draft(st["memory"]) if fb else None
+    previous = Draft(subject=prev.get("subject"), body=prev.get("body") or "") if prev and prev.get("body") else None
+    d = await tools.drafter.outreach(SimpleNamespace(**st["job"]), st["memory"], fb, previous=previous)
     return {"draft": d.model_dump(mode="json")}
 
 
@@ -138,6 +141,61 @@ def _thread(mem: CandidateMemory, extra_in: Optional[str] = None) -> list[Messag
     if extra_in is not None:
         msgs.append(Message(direction="in", body=extra_in))
     return msgs
+
+
+def _latest_draft(mem: CandidateMemory) -> Optional[dict]:
+    for e in reversed(mem.contact_log or []):
+        if isinstance(e, dict) and e.get("kind") == "draft":
+            return e
+    return None
+
+
+def _role_blurb(job: dict) -> str:
+    """Short, candidate-safe context for the voice interview (the join link is public: no rubric
+    weights, no agent notes)."""
+    form = job.get("form") or {}
+    if isinstance(form, str):
+        try:
+            form = json.loads(form)
+        except ValueError:
+            form = {}
+    musts = ", ".join((form or {}).get("must_haves") or [])
+    return f"{job.get('title') or 'Open'} role." + (f" Looking for: {musts}." if musts else "")
+
+
+def _interview_questions(job: dict) -> list[str]:
+    rubric = job.get("rubric") or {}
+    if isinstance(rubric, str):
+        try:
+            rubric = json.loads(rubric)
+        except ValueError:
+            rubric = {}
+    themes = [t for t in (rubric or {}).get("interview_themes") or [] if t][:4]
+    return themes or ["Walk me through a recent project you're proud of.",
+                      "How did you measure whether it worked?",
+                      "What would you do differently next time?"]
+
+
+def _with_default_args(st, d: Decision) -> Decision:
+    """Fill args code can derive from memory, so the approval payload is complete even when the
+    decide LLM (or the stub) returns minimal args (spec 05: args are derived by code)."""
+    args = dict(d.args or {})
+    mem, job = st.get("memory"), st.get("job") or {}
+    if d.action in (A.send_outreach, A.send_followup) and not args.get("body"):
+        draft = _latest_draft(mem) if mem is not None else None
+        if draft:
+            args.setdefault("subject", draft.get("subject"))
+            args["body"] = draft.get("body") or ""
+        elif d.action == A.send_followup:
+            args.setdefault("subject", f"Re: {job.get('title') or 'our role'}")
+            args["body"] = ("Just bumping this in case it got buried. Would a quick 15-minute call "
+                            "this week work?\n\nBest,\nthe CEO")
+    if d.action == A.schedule_interview:
+        if not args.get("questions"):
+            args["questions"] = _interview_questions(job)
+        if not args.get("context"):
+            args["context"] = _role_blurb(job)
+    return d if args == (d.args or {}) else d.model_copy(update={"args": args})
 
 
 def _thread_id(st) -> str:
@@ -169,7 +227,7 @@ async def _schedule_interview(tools, st) -> dict:
     d, mem = st["decision"], st["memory"]
     session = await tools.elevenlabs.create_interview(
         st["candidate_id"], list(d.args.get("questions") or []),
-        d.args.get("context") or mem.summary,
+        d.args.get("context") or _role_blurb(st["job"] or {}),
         job_id=st["job_id"], candidate_name=(st["candidate"] or {}).get("name"))
     expires = getattr(session, "expires_at", None)
     return {"session": {"conversation_id": getattr(session, "conversation_id", None),
@@ -429,6 +487,10 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None,
                 "escalate_reason": d.reasoning}
 
     async def permission_check(st: AgentState) -> dict:
+        out = await _permission_check({**st, "decision": _with_default_args(st, st["decision"])})
+        return {"decision": _with_default_args(st, st["decision"]), **out}
+
+    async def _permission_check(st: AgentState) -> dict:
         d, cid = st["decision"], st["candidate_id"]
         if (refusal := _refuse_duplicate_send(st)) is not None:
             return refusal  # don't even ask the CEO to approve a send that would be refused

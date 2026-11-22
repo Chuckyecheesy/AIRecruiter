@@ -38,7 +38,7 @@ def list_jobs(conn: sqlite3.Connection = Depends(get_conn)):
 async def create_job(body: JobCreateIn, conn: sqlite3.Connection = Depends(get_conn)):
     form = JobForm(**body.model_dump(by_alias=False))
     rubric = await generate_rubric(form)
-    job_id = call_repo("create_job", form=form.model_dump(), rubric=rubric.model_dump())
+    job_id = call_repo("create_job", form.title, form.model_dump(), rubric=rubric.model_dump())
     return _job_or_404(conn, job_id)
 
 
@@ -66,7 +66,7 @@ def start_job(job_id: str, conn: sqlite3.Connection = Depends(get_conn)):
         repo.start_job(job_id)
     else:
         call_repo("set_job_state", job_id, JobState.ACTIVE)
-        call_repo("emit_event", job_id, None, EventType.JobCreated, {})
+        call_repo("emit_event", job_id=job_id, type=EventType.JobCreated, candidate_id=None, payload={})
     return _job_or_404(conn, job_id)
 
 
