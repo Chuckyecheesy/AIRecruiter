@@ -624,8 +624,13 @@ def _refuse_duplicate_send(st: AgentState) -> Optional[dict]:
     reason = _duplicate_send_reason(repo.get_memory(cid), d)  # fresh: a send may have landed since observe
     if reason is None:
         return None
+    outcome = f"refused: {reason}"
+    state = S(repo.get_candidate(cid)["state"])
+    if d.action == A.send_outreach and state in (S.OUTREACH_DRAFTED, S.APPROVED):
+        repo.set_candidate_state(cid, S.CONTACTED)  # they were contacted already: don't re-draft or re-ask
+        outcome += f" ({state.value} -> CONTACTED)"
     repo.append_decision(cid, {"ts": repo.now_iso(), "action": d.action.value,
-                               "reasoning": d.reasoning, "outcome": f"refused: {reason}"})
+                               "reasoning": d.reasoning, "outcome": outcome})
     return {"route": "end"}
 
 
