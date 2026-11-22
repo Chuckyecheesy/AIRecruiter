@@ -38,6 +38,9 @@ DEFAULT_CHECKPOINT_DB = "data/checkpoints.db"
 MAX_RETRIES = 3
 TRANSIENT_BACKOFF_S = (1, 2, 4)
 RATE_LIMIT_CAP_S = 30
+# not_found is normally recorded and the agent re-decides from memory. These actions have no
+# alternative next step (the event is the only trigger), so a not_found there needs a human.
+NOT_FOUND_ESCALATES = frozenset({A.process_interview})
 
 
 _SERDE = JsonPlusSerializer(allowed_msgpack_modules=[
@@ -66,6 +69,8 @@ class AgentState(TypedDict, total=False):
     route: str          # observe/decide/permission_check/execute decide the next hop
     escalate_reason: str
     escalate_extra: dict
+    tool_redecided: bool    # an invalid_input tool error already used the one re-decide
+    redecide_error: Optional[str]
 
 
 def thread_id_for(job_id: str, candidate_id: Optional[str] = None) -> str:
@@ -404,7 +409,8 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
             from api.config import settings
             llm = make_llm(settings.llm_mode, ctx)
         state = S(st["candidate"]["state"]) if st.get("candidate") else "job"
-        outcome = await decide_validated(llm, state, st["job"], valid=st["valid_actions"])
+        outcome = await decide_validated(llm, state, st["job"], valid=st["valid_actions"],
+                                         error=st.get("redecide_error"))
         if outcome.escalate:
             return {"decide_attempts": outcome.attempts, "route": "escalate",
                     "escalate_reason": f"invalid decision twice: {outcome.error}"}
@@ -468,6 +474,15 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
         except PermissionDenied:
             return {"route": "end"}
         except ToolError as e:
+            if e.kind == "invalid_input" and not st.get("tool_redecided") and st.get("approval") is None:
+                # Counts as a decide-error: one re-decide with the tool's complaint, then escalate.
+                return {"tool_redecided": True, "decision": None, "route": "decide",
+                        "redecide_error": f"{d.action.value} was rejected by the tool: {e}"}
+            if e.kind == "not_found" and st.get("candidate_id") and d.action not in NOT_FOUND_ESCALATES:
+                # No retry, no escalation: leave a note; the next decision starts from memory.
+                notes = {**st["memory"].research_notes, f"{d.action.value}_error": f"not_found: {e}"}
+                repo.update_memory(st["candidate_id"], research_notes=notes)
+                return {"error": {"kind": e.kind, "message": str(e)}, "route": "end"}
             return _fail(st, e, getattr(e, "attempts", 1))
         return {"result": result, "route": "update_state"}
 
@@ -566,7 +581,7 @@ def build_graph(tools: Any = None, llm: Any = None, checkpointer: Any = None):
     g.add_edge(START, "observe")
     for src, targets in {
         "observe": {"decide", "execute", "escalate"}, "decide": {"permission_check", "escalate"},
-        "permission_check": {"execute"}, "execute": {"update_state", "escalate"},
+        "permission_check": {"execute"}, "execute": {"update_state", "escalate", "decide"},
     }.items():
         g.add_conditional_edges(
             src, lambda s, ok=targets: s["route"] if s["route"] in ok else END,
@@ -636,7 +651,8 @@ async def run_event(
                 {"job_id": event.job_id, "candidate_id": cid, "event": event,
                  "decide_attempts": 0, "run_id": run_id, "route": "decide",
                  "decision": None, "result": None, "error": None, "approval": None,
-                 "escalate_reason": "", "escalate_extra": {}, "valid_actions": []},
+                 "escalate_reason": "", "escalate_extra": {}, "valid_actions": [],
+                 "tool_redecided": False, "redecide_error": None},
                 config={"configurable": {"thread_id": tid}})
             # Finished cleanly: drop this thread's history. Checkpoints of a crashed run stay.
             await saver.adelete_thread(tid)

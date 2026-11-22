@@ -19,14 +19,15 @@ class DecideOutcome:
 
 
 async def decide_validated(
-    llm: LLMCall, state: CandidateState, job: Any, valid: Optional[list[ActionName]] = None
+    llm: LLMCall, state: CandidateState, job: Any, valid: Optional[list[ActionName]] = None,
+    error: Optional[str] = None,
 ) -> DecideOutcome:
-    """`valid` overrides the candidate table (job-level events have no candidate state)."""
+    """`valid` overrides the candidate table (job-level events have no candidate state).
+    `error` is shown to the first LLM call (e.g. a tool rejected the previous decision's args)."""
     if valid is None:
         valid = valid_actions(state, job)
     if not valid:
         return DecideOutcome(None, False, 0, f"no valid actions in {getattr(state, 'value', state)}")
-    error: Optional[str] = None
     for attempt in (1, 2):
         decision = await llm(list(valid), error)
         if decision.action in valid:

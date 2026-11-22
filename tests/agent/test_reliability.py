@@ -142,4 +142,4 @@ async def test_not_found_leaves_a_note_in_memory_for_the_next_decision(db, job, 
     cid = repo.create_candidate(job, "p1", "Ada")
     await _run(job, cid, FakePloid(enrich_errors=[ToolError("not_found", "no Ploid profile p1")]))
     notes = repo.get_memory(cid).research_notes
-    assert any("no Ploid profile p1" in str(n) for n in notes)
+    assert "no Ploid profile p1" in str(notes)
