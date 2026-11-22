@@ -23,8 +23,9 @@
 
 | Var | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude |
-| `MODEL_DECIDE`, `MODEL_DRAFT`, `MODEL_EVAL` | default `claude-sonnet-5-5` |
+| `LLM_PROVIDER` | `gemini` (default) or `anthropic` |
+| `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` | key for the selected LLM provider |
+| `MODEL_DECIDE`, `MODEL_DRAFT`, `MODEL_EVAL` | Gemini 2.5 Flash by default |
 | `TOOLS_MODE` | `mock` / `real` (per-tool overrides: `PLOID_MODE`, `FIBER_MODE`, `ELEVENLABS_MODE`, `BROWSER_MODE`) |
 | `PLOID_API_KEY`, `PLOID_BASE_URL` | TBD |
 | `FIBER_API_KEY`, `FIBER_BASE_URL` | TBD |
@@ -71,7 +72,7 @@ Playwright headless Chromium inside the container (`--no-sandbox`, a single cont
 
 ## Local run
 ```
-cp .env.example .env            # add ANTHROPIC_API_KEY at minimum
+cp .env.example .env            # add GEMINI_API_KEY at minimum
 TOOLS_MODE=mock make dev        # api on :8000, web on :3000
 python scripts/reset_demo.py    # seed a demo job
 ```

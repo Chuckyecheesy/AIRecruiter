@@ -44,7 +44,7 @@ Event row → `observe` (lock, load memory, `valid_actions`) → `decide` (Claud
 
 ## Commands
 ```
-cp .env.example .env              # ANTHROPIC_API_KEY at minimum
+cp .env.example .env              # GEMINI_API_KEY at minimum
 TOOLS_MODE=mock make dev          # api :8000, web :3000
 LLM_MODE=stub                     # canned decisions, offline
 python scripts/reset_demo.py      # reset + seed demo job

@@ -75,8 +75,10 @@ def build_tools(s: Settings) -> Tools:
                                              if not getattr(s, k.lower())])
 
     # Fiber (always wrapped by the demo-inbox rewrite)
-    if s.mode_for("fiber") == "real" and s.fiber_api_key and s.fiber_base_url:
-        fiber_inner: Any = RealFiberClient(s.fiber_api_key, s.fiber_base_url); status["fiber"] = "real"
+    fiber_api_key = s.fiber_api_key or s.fibre_api_key
+    fiber_base_url = s.fiber_base_url or s.fibre_base_url
+    if s.mode_for("fiber") == "real" and fiber_api_key and fiber_base_url:
+        fiber_inner: Any = RealFiberClient(fiber_api_key, fiber_base_url); status["fiber"] = "real"
     else:
         fiber_inner = MockFiberClient()
         status["fiber"] = fallback("fiber", [k for k in ("FIBER_API_KEY", "FIBER_BASE_URL")

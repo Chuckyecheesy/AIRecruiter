@@ -400,7 +400,7 @@ async def test_browser_off_by_default():
 
 
 def test_build_tools_llm_status_real_when_enabled():
-    t = build_tools(S(llm_mode="real", anthropic_api_key="sk-test"))  # constructs client, no call
+    t = build_tools(S(llm_mode="real", llm_provider="anthropic", anthropic_api_key="sk-test"))  # constructs client, no call
     assert t.status["drafter"] == t.status["evaluator"] == t.status["rubric"] == t.status["persona"] == "real"
 
 

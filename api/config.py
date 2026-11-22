@@ -13,15 +13,15 @@ Mode = Literal["mock", "real", "off"]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
-    # Claude
+    # LLM (default provider: Gemini; Claude model ids map to GEMINI_MODEL when provider=gemini)
+    llm_provider: Literal["anthropic", "gemini"] = "gemini"
     anthropic_api_key: str | None = None
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.8-flash"  # used for every role when LLM_PROVIDER=gemini
     model_decide: str = "claude-sonnet-5-5"
     model_draft: str = "claude-sonnet-5-5"
     model_eval: str = "claude-sonnet-5-5"
     llm_mode: Literal["real", "stub"] = "real"
-    llm_provider: Literal["anthropic", "gemini"] = "anthropic"
-    gemini_api_key: str | None = None
-    gemini_model: str = "gemini-3.8-flash"  # used for every role when LLM_PROVIDER=gemini
     llm_timeout_s: float = 45.0
     # Used in outreach sign-offs; never invented by the model.
     company_name: str | None = None
@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     tools_mode: Literal["mock", "real"] = "mock"
     ploid_mode: Mode | None = None
     fiber_mode: Mode | None = None
+    fibre_mode: Mode | None = None
     elevenlabs_mode: Mode | None = None
     browser_mode: Mode | None = None
     fail_tool: str | None = None  # demo flag: e.g. "fiber" -> that tool always raises transient
@@ -40,6 +41,8 @@ class Settings(BaseSettings):
     ploid_base_url: str | None = None
     fiber_api_key: str | None = None
     fiber_base_url: str | None = None
+    fibre_api_key: str | None = None
+    fibre_base_url: str | None = None
 
     # ElevenLabs
     elevenlabs_api_key: str | None = None
@@ -85,6 +88,8 @@ class Settings(BaseSettings):
 
     def mode_for(self, tool: str) -> Mode:
         """Resolve mock/real/off for a tool ("ploid", "fiber", "elevenlabs", "browser")."""
+        if tool == "fibre":
+            tool = "fiber"
         override = getattr(self, f"{tool}_mode", None)
         if override:
             return override
@@ -98,9 +103,12 @@ class Settings(BaseSettings):
 
     @property
     def llm_enabled(self) -> bool:
-        # The SDK also resolves ANTHROPIC_AUTH_TOKEN / `ant auth login` profiles, so don't require the key.
         # Set LLM_MODE=stub for fully offline work.
         return self.llm_mode == "real"
+
+    @property
+    def llm_api_key(self) -> str | None:
+        return self.gemini_api_key if self.llm_provider == "gemini" else self.anthropic_api_key
 
 
 @lru_cache

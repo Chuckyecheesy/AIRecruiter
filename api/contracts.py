@@ -12,8 +12,8 @@ Sections:
 
 from __future__ import annotations
 
-from enum import StrEnum
-from typing import Any, Literal
+from enum import Enum, StrEnum
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel

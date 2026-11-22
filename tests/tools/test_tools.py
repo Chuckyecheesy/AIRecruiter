@@ -14,6 +14,13 @@ def mock_settings(**kw) -> Settings:
     return Settings(**{**base, **kw})
 
 
+def test_gemini_provider_is_default():
+    s = Settings(_env_file=None)
+    assert s.llm_provider == "gemini"
+    assert s.llm_api_key == s.gemini_api_key
+
+
+
 @pytest.fixture
 def tools():
     return build_tools(mock_settings())
