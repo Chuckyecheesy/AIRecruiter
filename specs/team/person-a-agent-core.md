@@ -23,16 +23,16 @@
 - [ ] `repo.py` real implementations (ULIDs, ISO timestamps, JSON columns validated with Pydantic)
 - [ ] Per-candidate lock (`locked_by`, `locked_at`)
 - [ ] Dispatcher: 1s poll loop, respects `not_before`, serial per candidate, `Semaphore(MAX_CONCURRENT_RUNS)`, skips `PAUSED` jobs
-- [ ] Crash recovery: reset `processing` rows older than 2 min to `pending` on startup
-- [ ] LangGraph `StateGraph`: `observe → decide → permission_check → execute → update_state`, plus `escalate`
-- [ ] `SqliteSaver` on `data/checkpoints.db`, thread id `{job_id}:{candidate_id}` / `{job_id}:job`
-- [ ] `prompts.py`: decide prompt contract from spec 05, structured output `{action, args, reasoning}`
-- [ ] Decide validation: action must be in `valid_actions`. Re-decide once, then escalate
-- [ ] `LLM_MODE=stub`: canned happy-path decisions (also unblocks C's UI work)
-- [ ] `JobCreated` → `search_candidates` → insert `DISCOVERED` up to `max_candidates` → emit `CandidateFound` per candidate
-- [ ] `execute` calls `get_tools()` adapters and writes a `tool_calls` row with `idempotency_key`
-- [ ] Rolling `memory.summary` and `decisions` updates in `update_state`
-- [ ] **Sync 1:10:** run a mock job and show all candidates in `OUTREACH_DRAFTED`
+- [x] Crash recovery: reset `processing` rows older than 2 min to `pending` on startup
+- [x] LangGraph `StateGraph`: `observe → decide → permission_check → execute → update_state`, plus `escalate`
+- [x] `SqliteSaver` on `data/checkpoints.db`, thread id `{job_id}:{candidate_id}` / `{job_id}:job`
+- [x] `prompts.py`: decide prompt contract from spec 05, structured output `{action, args, reasoning}`
+- [x] Decide validation: action must be in `valid_actions`. Re-decide once, then escalate
+- [x] `LLM_MODE=stub`: canned happy-path decisions (also unblocks C's UI work)
+- [x] `JobCreated` → `search_candidates` → insert `DISCOVERED` up to `max_candidates` → emit `CandidateFound` per candidate
+- [x] `execute` calls `get_tools()` adapters and writes a `tool_calls` row with `idempotency_key`
+- [x] Rolling `memory.summary` and `decisions` updates in `update_state`
+- [x] **Sync 1:10:** run a mock job and show all candidates in `OUTREACH_DRAFTED`
 
 ## 1:10-1:40 Permission layer → checkpoint: approve → `CONTACTED` → `INTERESTED`
 - [ ] `permissions.py`: capability matrix, per-job policy, `auto_approve` / `auto_approve_actions`

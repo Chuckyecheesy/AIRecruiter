@@ -4,9 +4,9 @@ The build is split into three **lanes**. Each lane owns a set of files. **You on
 
 | Lane | Person | Focus | Checklist |
 |---|---|---|---|
-| **A: Agent Core** | _name_ | State machine, DB, events, dispatcher, LangGraph, permissions, Langfuse | [person-a-agent-core.md](person-a-agent-core.md) |
-| **B: Tools & Infra** | _name_ | Adapters (Ploid, Fiber, browser, email sim, persona, ElevenLabs), Claude drafter/evaluator/rubric, Docker, Maritime | [person-b-tools-infra.md](person-b-tools-infra.md) |
-| **C: API & Dashboard** | _name_ | FastAPI routes, assistant-ui chat dashboard (Next.js), SSE, demo scripts, demo rehearsal | [person-c-api-dashboard.md](person-c-api-dashboard.md) |
+| **A: Agent Core** | William | State machine, DB, events, dispatcher, LangGraph, permissions, Langfuse | [person-a-agent-core.md](person-a-agent-core.md) |
+| **B: Tools & Infra** | Justin | Adapters (Ploid, Fiber, browser, email sim, persona, ElevenLabs), Claude drafter/evaluator/rubric, Docker, Maritime | [person-b-tools-infra.md](person-b-tools-infra.md) |
+| **C: API & Dashboard** | Jayden | FastAPI routes, dashboard (Next.js), SSE, demo scripts, demo rehearsal | [person-c-api-dashboard.md](person-c-api-dashboard.md) |
 
 ## File ownership map
 
@@ -26,8 +26,8 @@ AIRecruiter/
     tools/                 B   base, ploid, fiber, browser, email_sim, elevenlabs, persona,
                                drafter, evaluator, rubric
     routes/webhooks.py     B   (ElevenLabs webhook)
-    routes/*.py (others)   C   jobs, candidates, approvals, events, chat, admin, health
-  web/                     C   Next.js + assistant-ui (Thread, tool UIs, external store runtime)
+    routes/*.py (others)   C   jobs, candidates, approvals, events, admin, health
+  web/                     C   Next.js (candidate list, inline approval cards, activity feed)
   fixtures/                B
   scripts/reset_demo.py    C
   scripts/smoke.py         C

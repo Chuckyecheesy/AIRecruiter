@@ -1,0 +1,437 @@
+[
+  {
+    "ploid_id": "pl_001",
+    "name": "Sarah Chen",
+    "headline": "AI Engineer building RAG apps in TypeScript",
+    "location": "Waterloo, ON",
+    "profile_urls": [
+      "https://github.com/sarahchen-dev",
+      "https://linkedin.com/in/sarahchen-dev"
+    ],
+    "profile": {
+      "ploid_id": "pl_001",
+      "name": "Sarah Chen",
+      "headline": "AI Engineer building RAG apps in TypeScript",
+      "location": "Waterloo, ON",
+      "skills": [
+        "React",
+        "TypeScript",
+        "RAG",
+        "LangChain",
+        "Python",
+        "pgvector",
+        "Next.js"
+      ],
+      "projects": [
+        {
+          "name": "AI Study Assistant",
+          "description": "RAG tutor over lecture notes; 2k MAU",
+          "tech": [
+            "TypeScript",
+            "Next.js",
+            "pgvector",
+            "Claude"
+          ],
+          "url": "https://github.com/sarahchen-dev/study-assistant"
+        },
+        {
+          "name": "Docs Q&A bot",
+          "description": "Retrieval over internal docs with citations",
+          "tech": [
+            "Python",
+            "FastAPI"
+          ],
+          "url": null
+        }
+      ],
+      "education": [
+        "BSc Computer Science, Wilfrid Laurier University (WLU)"
+      ],
+      "experience": [
+        {
+          "company": "Lumen Labs",
+          "title": "AI Engineer",
+          "start": "2023-06",
+          "end": null,
+          "summary": "Built retrieval pipeline and eval harness for customer support copilot"
+        },
+        {
+          "company": "Shopify",
+          "title": "Software Engineering Intern",
+          "start": "2022-05",
+          "end": "2022-08",
+          "summary": "Frontend work on admin in React/TypeScript"
+        }
+      ],
+      "links": {
+        "github": "https://github.com/sarahchen-dev",
+        "linkedin": "https://linkedin.com/in/sarahchen-dev"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.92
+    }
+  },
+  {
+    "ploid_id": "pl_002",
+    "name": "Marcus Okafor",
+    "headline": "Senior full-stack engineer, LLM products",
+    "location": "Toronto, ON",
+    "profile_urls": [
+      "https://github.com/mokafor",
+      "https://marcusokafor.dev"
+    ],
+    "profile": {
+      "ploid_id": "pl_002",
+      "name": "Marcus Okafor",
+      "headline": "Senior full-stack engineer, LLM products",
+      "location": "Toronto, ON",
+      "skills": [
+        "TypeScript",
+        "Node.js",
+        "RAG",
+        "Vector databases",
+        "AWS",
+        "React",
+        "Evaluation"
+      ],
+      "projects": [
+        {
+          "name": "Contract Clause Finder",
+          "description": "Hybrid search + reranking over legal contracts",
+          "tech": [
+            "TypeScript",
+            "Pinecone",
+            "Cohere Rerank"
+          ],
+          "url": null
+        },
+        {
+          "name": "evals-kit",
+          "description": "Open-source LLM eval runner, 400 GitHub stars",
+          "tech": [
+            "TypeScript"
+          ],
+          "url": "https://github.com/mokafor/evals-kit"
+        }
+      ],
+      "education": [
+        "BEng Software Engineering, McMaster University"
+      ],
+      "experience": [
+        {
+          "company": "Wealthsimple",
+          "title": "Senior Software Engineer",
+          "start": "2021-03",
+          "end": null,
+          "summary": "Led the LLM-powered support search; owns the retrieval service"
+        },
+        {
+          "company": "Ritual",
+          "title": "Software Engineer",
+          "start": "2018-07",
+          "end": "2021-02",
+          "summary": "Full-stack TypeScript"
+        }
+      ],
+      "links": {
+        "github": "https://github.com/mokafor",
+        "portfolio": "https://marcusokafor.dev"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.88
+    }
+  },
+  {
+    "ploid_id": "pl_006",
+    "name": "Sarah  Chen.",
+    "headline": "AI/ML engineer | RAG | TypeScript",
+    "location": "Waterloo, Ontario",
+    "profile_urls": [
+      "https://github.com/sarahchen-dev"
+    ],
+    "profile": {
+      "ploid_id": "pl_006",
+      "name": "Sarah  Chen.",
+      "headline": "AI/ML engineer | RAG | TypeScript",
+      "location": "Waterloo, Ontario",
+      "skills": [
+        "TypeScript",
+        "RAG",
+        "React"
+      ],
+      "projects": [
+        {
+          "name": "AI Study Assistant",
+          "description": "RAG tutor",
+          "tech": [
+            "TypeScript"
+          ],
+          "url": null
+        }
+      ],
+      "education": [
+        "Wilfrid Laurier University"
+      ],
+      "experience": [],
+      "links": {
+        "github": "https://github.com/sarahchen-dev"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.55
+    }
+  },
+  {
+    "ploid_id": "pl_003",
+    "name": "Priya Raman",
+    "headline": "ML engineer moving into applied LLM work",
+    "location": "Montreal, QC",
+    "profile_urls": [
+      "https://github.com/priyaraman",
+      "https://linkedin.com/in/priya-raman"
+    ],
+    "profile": {
+      "ploid_id": "pl_003",
+      "name": "Priya Raman",
+      "headline": "ML engineer moving into applied LLM work",
+      "location": "Montreal, QC",
+      "skills": [
+        "Python",
+        "PyTorch",
+        "RAG",
+        "TypeScript",
+        "Docker",
+        "FastAPI"
+      ],
+      "projects": [
+        {
+          "name": "Paper Pal",
+          "description": "Semantic search over arXiv with chunking experiments",
+          "tech": [
+            "Python",
+            "FAISS",
+            "FastAPI"
+          ],
+          "url": "https://github.com/priyaraman/paper-pal"
+        }
+      ],
+      "education": [
+        "MSc Computer Science, McGill University"
+      ],
+      "experience": [
+        {
+          "company": "Element AI / ServiceNow",
+          "title": "ML Engineer",
+          "start": "2020-09",
+          "end": null,
+          "summary": "Model serving and retrieval experiments for enterprise search"
+        }
+      ],
+      "links": {
+        "github": "https://github.com/priyaraman",
+        "linkedin": "https://linkedin.com/in/priya-raman"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.8
+    }
+  },
+  {
+    "ploid_id": "pl_005",
+    "name": "Lena Fischer",
+    "headline": "Software developer",
+    "location": "Remote",
+    "profile_urls": [
+      "https://github.com/lenafischer"
+    ],
+    "profile": {
+      "ploid_id": "pl_005",
+      "name": "Lena Fischer",
+      "headline": "Software developer",
+      "location": "Remote",
+      "skills": [
+        "TypeScript"
+      ],
+      "projects": [],
+      "education": [],
+      "experience": [],
+      "links": {
+        "github": "https://github.com/lenafischer"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.35
+    }
+  },
+  {
+    "ploid_id": "pl_004",
+    "name": "Diego Alvarez",
+    "headline": "Backend engineer (Java, payments)",
+    "location": "Vancouver, BC",
+    "profile_urls": [
+      "https://linkedin.com/in/diego-alvarez-payments"
+    ],
+    "profile": {
+      "ploid_id": "pl_004",
+      "name": "Diego Alvarez",
+      "headline": "Backend engineer (Java, payments)",
+      "location": "Vancouver, BC",
+      "skills": [
+        "Java",
+        "Spring",
+        "Kafka",
+        "PostgreSQL"
+      ],
+      "projects": [
+        {
+          "name": "Ledger service",
+          "description": "Double-entry ledger for payments",
+          "tech": [
+            "Java",
+            "Kafka"
+          ],
+          "url": null
+        }
+      ],
+      "education": [
+        "BSc Computer Science, UBC"
+      ],
+      "experience": [
+        {
+          "company": "Paymentus",
+          "title": "Backend Engineer",
+          "start": "2019-01",
+          "end": null,
+          "summary": "Payments backend in Java"
+        }
+      ],
+      "links": {
+        "linkedin": "https://linkedin.com/in/diego-alvarez-payments"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.75
+    }
+  },
+  {
+    "ploid_id": "pl_008",
+    "name": "Aisha Mohammed",
+    "headline": "Applied AI engineer, agents + retrieval",
+    "location": "Ottawa, ON",
+    "profile_urls": [
+      "https://github.com/aisha-m-ai"
+    ],
+    "profile": {
+      "ploid_id": "pl_008",
+      "name": "Aisha Mohammed",
+      "headline": "Applied AI engineer, agents + retrieval",
+      "location": "Ottawa, ON",
+      "skills": [
+        "Python",
+        "TypeScript",
+        "RAG",
+        "LangGraph",
+        "Agents",
+        "Next.js"
+      ],
+      "projects": [
+        {
+          "name": "Grant Writer Agent",
+          "description": "Multi-step agent drafting grant applications from org docs",
+          "tech": [
+            "LangGraph",
+            "Python",
+            "Claude"
+          ],
+          "url": null
+        },
+        {
+          "name": "Clinic FAQ RAG",
+          "description": "Retrieval bot for a community health clinic",
+          "tech": [
+            "TypeScript",
+            "Supabase pgvector"
+          ],
+          "url": null
+        }
+      ],
+      "education": [
+        "BCS, University of Ottawa"
+      ],
+      "experience": [
+        {
+          "company": "Shopify",
+          "title": "Software Engineer",
+          "start": "2022-01",
+          "end": null,
+          "summary": "AI features for merchant support"
+        }
+      ],
+      "links": {
+        "github": "https://github.com/aisha-m-ai"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.85
+    }
+  },
+  {
+    "ploid_id": "pl_007",
+    "name": "Tom Becker",
+    "headline": "Junior frontend developer",
+    "location": "Kitchener, ON",
+    "profile_urls": [
+      "https://github.com/tombecker"
+    ],
+    "profile": {
+      "ploid_id": "pl_007",
+      "name": "Tom Becker",
+      "headline": "Junior frontend developer",
+      "location": "Kitchener, ON",
+      "skills": [
+        "React",
+        "TypeScript",
+        "CSS"
+      ],
+      "projects": [
+        {
+          "name": "Weather dashboard",
+          "description": "React app consuming a public API",
+          "tech": [
+            "React",
+            "TypeScript"
+          ],
+          "url": null
+        }
+      ],
+      "education": [
+        "Diploma, Conestoga College"
+      ],
+      "experience": [
+        {
+          "company": "Freelance",
+          "title": "Frontend Developer",
+          "start": "2023-01",
+          "end": null,
+          "summary": "Small business websites"
+        }
+      ],
+      "links": {
+        "github": "https://github.com/tombecker"
+      },
+      "raw": {
+        "source": "fixture"
+      },
+      "completeness": 0.65
+    }
+  }
+]

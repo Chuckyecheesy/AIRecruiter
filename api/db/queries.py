@@ -16,7 +16,7 @@ from typing import Any
 from api.contracts import (
     ApprovalOut,
     CandidateDetailOut,
-    CandidateMemory,
+    CandidateMemoryOut,
     CandidateOut,
     CandidateState,
     EvaluationOut,
@@ -191,7 +191,7 @@ def get_candidate(conn: sqlite3.Connection, candidate_id: str) -> CandidateDetai
     mem_row = conn.execute("SELECT * FROM candidate_memory WHERE candidate_id = ?", (candidate_id,)).fetchone()
     memory = None
     if mem_row:
-        memory = CandidateMemory(
+        memory = CandidateMemoryOut(
             candidate_id=candidate_id,
             profile=_j(mem_row["profile"], {}),
             research_notes=_j(mem_row["research_notes"], {}),

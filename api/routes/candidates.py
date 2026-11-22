@@ -43,7 +43,7 @@ def resume_candidate(candidate_id: str, conn: sqlite3.Connection = Depends(get_c
     """NEEDS_HUMAN -> prev_state (emits HumanResolved), or STALE -> reactivate."""
     c = _candidate_or_404(conn, candidate_id)
     if c.state not in (CandidateState.NEEDS_HUMAN, CandidateState.STALE):
-        raise HTTPException(409, f"candidate is {c.state}, expected NEEDS_HUMAN or STALE")
+        raise HTTPException(409, f"candidate is {c.state.value}, expected NEEDS_HUMAN or STALE")
     call_repo("resume_candidate", candidate_id)
     return _candidate_or_404(conn, candidate_id)
 
@@ -52,7 +52,7 @@ def resume_candidate(candidate_id: str, conn: sqlite3.Connection = Depends(get_c
 def skip_candidate(candidate_id: str, conn: sqlite3.Connection = Depends(get_conn)):
     c = _candidate_or_404(conn, candidate_id)
     if c.state in TERMINAL_STATES:
-        raise HTTPException(409, f"candidate is already {c.state}")
+        raise HTTPException(409, f"candidate is already {c.state.value}")
     call_repo("skip_candidate", candidate_id)
     return _candidate_or_404(conn, candidate_id)
 

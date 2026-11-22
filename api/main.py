@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import admin, approvals, candidates, chat, events, jobs
+from api.routes import admin, approvals, candidates, events, jobs
 from api.routes.deps import start_dispatcher, stop_dispatcher
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -18,6 +18,12 @@ logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:  # lane A's repo and our read queries must share one DB file
+        from api.db import queries, repo
+
+        repo.init_db(queries.db_path())
+    except ImportError:
+        pass
     if os.environ.get("DISPATCHER_ENABLED", "true").lower() not in {"0", "false", "no"}:
         await start_dispatcher()
     yield
@@ -49,7 +55,7 @@ def create_app() -> FastAPI:
                 return JSONResponse({"detail": "missing or bad X-Demo-Token"}, status_code=401)
             return await call_next(request)
 
-    for r in (jobs, candidates, approvals, events, chat, admin):
+    for r in (jobs, candidates, approvals, events, admin):
         app.include_router(r.router, prefix="/api")
 
     try:  # lane B's ElevenLabs webhook router

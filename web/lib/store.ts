@@ -5,13 +5,6 @@ import { api } from "./api";
 import { subscribeEvents, type StreamStatus } from "./sse";
 import type { Approval, Candidate, CandidateDetail, EventRow, JobDetail } from "./types";
 
-export type LocalChat = {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  createdAt: string;
-};
-
 type JobStore = {
   jobId: string | null;
   job: JobDetail | null;
@@ -20,9 +13,7 @@ type JobStore = {
   candidates: Candidate[];
   approvals: Record<string, Approval>;
   details: Record<string, CandidateDetail>;
-  chat: LocalChat[];
   streamStatus: StreamStatus;
-  focusedApprovalId: string | null;
   candidateFilter: string | null;
   drawerCandidateId: string | null;
   error: string | null;
@@ -32,14 +23,10 @@ type JobStore = {
   refreshCandidates: () => Promise<void>;
   refreshApprovals: () => Promise<void>;
   refreshDetail: (candidateId: string) => Promise<CandidateDetail | null>;
-  setFocusedApproval: (id: string | null) => void;
   setCandidateFilter: (id: string | null) => void;
   openDrawer: (id: string | null) => void;
-  addChat: (m: Omit<LocalChat, "id" | "createdAt">) => void;
   setError: (e: string | null) => void;
 };
-
-let chatSeq = 0;
 
 const debounce = <F extends (...a: any[]) => void>(fn: F, ms: number) => {
   let t: ReturnType<typeof setTimeout> | null = null;
@@ -71,9 +58,7 @@ export const useJobStore = create<JobStore>((set, get) => {
     candidates: [],
     approvals: {},
     details: {},
-    chat: [],
     streamStatus: "connecting",
-    focusedApprovalId: null,
     candidateFilter: null,
     drawerCandidateId: null,
     error: null,
@@ -87,8 +72,6 @@ export const useJobStore = create<JobStore>((set, get) => {
         candidates: [],
         approvals: {},
         details: {},
-        chat: [],
-        focusedApprovalId: null,
         candidateFilter: null,
         drawerCandidateId: null,
         error: null,
@@ -140,8 +123,6 @@ export const useJobStore = create<JobStore>((set, get) => {
         const approvals: Record<string, Approval> = {};
         for (const a of list) approvals[a.id] = a;
         set({ approvals });
-        const f = get().focusedApprovalId;
-        if (f && approvals[f]?.status !== "pending") set({ focusedApprovalId: null });
       } catch {}
     },
     refreshDetail: async (candidateId) => {
@@ -153,16 +134,11 @@ export const useJobStore = create<JobStore>((set, get) => {
         return null;
       }
     },
-    setFocusedApproval: (id) => set({ focusedApprovalId: id }),
     setCandidateFilter: (id) => set({ candidateFilter: id }),
     openDrawer: (id) => {
       set({ drawerCandidateId: id });
       if (id) get().refreshDetail(id);
     },
-    addChat: (m) =>
-      set({
-        chat: [...get().chat, { ...m, id: `chat-${++chatSeq}`, createdAt: new Date().toISOString() }],
-      }),
     setError: (e) => set({ error: e }),
   };
 });
