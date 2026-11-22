@@ -78,6 +78,9 @@ class DemoInboxFiber:
 
     async def find_contact(self, name: str, links: dict[str, str], company_hint: str | None) -> ContactInfo:
         info = await self._inner.find_contact(name, links, company_hint)
+        if info.email and _base(info.email) == _base(self._inbox):
+            # Already the demo inbox itself (e.g. the team's own address): keep it exactly.
+            return info.model_copy(update={"phone": None})
         return info.model_copy(update={"email": demo_address(self._inbox, name), "phone": None})
 
 
@@ -94,6 +97,11 @@ def demo_address(inbox: str, tag: str) -> str:
     if not slug:  # e.g. "!!!" or a name in a non-Latin script: stable short hash instead
         slug = "c" + hashlib.sha256(tag.encode()).hexdigest()[:8]
     return f"{local}+{slug[:40]}@{domain}"
+
+
+def _base(addr: str) -> str:
+    local, _, domain = addr.strip().lower().partition("@")
+    return f"{local.split('+', 1)[0]}@{domain}"
 
 
 def _key(name: str) -> str:
