@@ -151,3 +151,29 @@ async def test_followup_with_new_content_is_allowed_after_outreach(db):
     await graph.run_event(granted, tools=tools, llm=never_called_llm())
     assert [m["body"] for m in tools.email.sent] == ["A genuinely new message"]
     assert refusals(cid, A.send_followup) == []
+
+
+# ---------- a refused outreach means they were already contacted ----------
+
+@pytest.mark.parametrize("start", [S.OUTREACH_DRAFTED, S.APPROVED])
+async def test_refused_outreach_moves_the_candidate_to_contacted(db, start):
+    job = make_job()
+    cid = make_candidate(job, start)
+    with_prior_send(cid)
+    if start == S.APPROVED:
+        aid, granted = await _granted(job, cid, A.send_outreach, {"subject": "Hi", "body": "Late"})
+        await graph.run_event(granted, tools=tools_with(), llm=never_called_llm())
+    else:
+        await graph.run_event(event(job, E.Tick, cid), tools=tools_with(),
+                              llm=scripted(A.send_outreach, subject="Hi", body="again"))
+    assert state_of(cid) == S.CONTACTED
+
+
+async def test_refused_followup_leaves_the_state_alone(db):
+    job = make_job()
+    cid = make_candidate(job, S.CONTACTED)
+    with_prior_send(cid, subject="Checking in", body="Any thoughts?")
+    aid, granted = await _granted(job, cid, A.send_followup,
+                                  {"subject": "Checking in", "body": "Any thoughts?"})
+    await graph.run_event(granted, tools=tools_with(), llm=never_called_llm())
+    assert state_of(cid) == S.CONTACTED
