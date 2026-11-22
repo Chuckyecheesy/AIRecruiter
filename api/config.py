@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     tools_mode: Literal["mock", "real"] = "mock"
     ploid_mode: Mode | None = None
     fiber_mode: Mode | None = None
+    fibre_mode: Mode | None = None
     elevenlabs_mode: Mode | None = None
     browser_mode: Mode | None = None
     fail_tool: str | None = None  # demo flag: e.g. "fiber" -> that tool always raises transient
@@ -34,6 +35,8 @@ class Settings(BaseSettings):
     ploid_base_url: str | None = None
     fiber_api_key: str | None = None
     fiber_base_url: str | None = None
+    fibre_api_key: str | None = None
+    fibre_base_url: str | None = None
 
     # ElevenLabs
     elevenlabs_api_key: str | None = None
@@ -67,6 +70,8 @@ class Settings(BaseSettings):
 
     def mode_for(self, tool: str) -> Mode:
         """Resolve mock/real/off for a tool ("ploid", "fiber", "elevenlabs", "browser")."""
+        if tool == "fibre":
+            tool = "fiber"
         override = getattr(self, f"{tool}_mode", None)
         if override:
             return override

@@ -59,8 +59,10 @@ def build_tools(s: Settings) -> Tools:
         ploid = MockPloidClient(); status["ploid"] = "mock"
 
     # Fiber (always wrapped by the demo-inbox rewrite)
-    if s.mode_for("fiber") == "real" and s.fiber_api_key and s.fiber_base_url:
-        fiber_inner: Any = RealFiberClient(s.fiber_api_key, s.fiber_base_url); status["fiber"] = "real"
+    fiber_api_key = s.fiber_api_key or s.fibre_api_key
+    fiber_base_url = s.fiber_base_url or s.fibre_base_url
+    if s.mode_for("fiber") == "real" and fiber_api_key and fiber_base_url:
+        fiber_inner: Any = RealFiberClient(fiber_api_key, fiber_base_url); status["fiber"] = "real"
     else:
         fiber_inner = MockFiberClient(); status["fiber"] = "mock"
     fiber: Any = DemoInboxFiber(fiber_inner, s.demo_inbox)
